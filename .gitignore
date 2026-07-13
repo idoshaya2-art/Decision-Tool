@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+data/intopia.db
+data/uploads/*
+!data/uploads/.gitkeep
