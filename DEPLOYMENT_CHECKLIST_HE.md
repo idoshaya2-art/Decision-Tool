@@ -1,0 +1,137 @@
+# פריסה חינמית — Supabase + GitHub + Render
+
+## א. Supabase
+
+### מערכת חדשה
+
+1. צרו פרויקט ב־Supabase ושמרו את סיסמת מסד הנתונים במקום בטוח.
+2. פתחו **SQL Editor → New query**.
+3. העתיקו את כל `supabase/schema.sql`, הדביקו ולחצו **Run**.
+4. ודאו ב־Storage שקיים bucket פרטי בשם `intopia-files`.
+
+### מערכת v0.4 קיימת
+
+1. הורידו קודם גיבוי מלא מהאפליקציה.
+2. הריצו רק את `supabase/migration_v0.5.sql`.
+3. הסקריפט מוסיף טבלאות ושדות; הוא אינו מוחק נתוני חברה.
+
+### העתיקו שני פרטים
+
+ב־Supabase פתחו **Project Settings → API Keys** או **Connect**:
+
+- Project URL → ישמש כ־`SUPABASE_URL`.
+- Secret key שמיועד לשרת, או `service_role` הישן → ישמש כ־`SUPABASE_SECRET_KEY`.
+
+אל תשתמשו ב־anon/publishable key. אל תעלו את ה־Secret key ל־GitHub ואל תשלחו אותו לחברי הצוות.
+
+## ב. GitHub
+
+1. חלצו את חבילת ה־ZIP.
+2. העלו את **כל מה שבתוך התיקייה**, לא את קובץ ה־ZIP ולא תיקיית מעטפת נוספת.
+3. בשורש המאגר חייבים להופיע:
+
+```text
+main.py
+analytics.py
+agent_service.py
+import_service.py
+requirements.txt
+render.yaml
+static/
+supabase/
+tests/
+```
+
+4. אסור להעלות `.env`, מפתחות, דוחות אמיתיים, קובצי גיבוי או SQLite.
+
+## ג. Render
+
+### הדרך הקלה — Blueprint
+
+1. היכנסו ל־Render וחברו את GitHub.
+2. בחרו **New → Blueprint**.
+3. בחרו את המאגר. Render יקרא את `render.yaml`.
+4. הזינו כאשר תתבקשו:
+
+| Key | ערך |
+|---|---|
+| `SUPABASE_URL` | Project URL שהעתקתם |
+| `SUPABASE_SECRET_KEY` | Secret/service-role key של השרת |
+| `APP_ACCESS_PASSWORD` | סיסמת צוות חדשה וחזקה |
+
+5. אשרו Deploy.
+
+### אם יוצרים Web Service ידנית
+
+```text
+Language: Python 3
+Build Command: pip install -r requirements.txt
+Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
+Health Check Path: /api/health
+Plan: Free
+```
+
+הגדירו גם:
+
+```text
+INTOPIA_BACKEND=supabase
+APP_ENV=production
+SUPABASE_BUCKET=intopia-files
+APP_REQUIRE_AUTH=true
+APP_ACCESS_USER=intopia
+MAX_UPLOAD_MB=10
+MAX_RESTORE_MB=100
+OPENAI_AGENT_ENABLED=false
+OPENAI_MAX_OUTPUT_TOKENS=1200
+```
+
+## ד. בדיקה
+
+1. פתחו `https://YOUR-SERVICE.onrender.com/api/health`.
+2. התוצאה התקינה כוללת:
+
+```json
+{
+  "status": "ok",
+  "backend": "supabase",
+  "database": "ok",
+  "storage": "ok"
+}
+```
+
+3. פתחו את הלינק הרגיל. שם המשתמש הוא `intopia` וסיסמת הצוות היא `APP_ACCESS_PASSWORD`.
+4. שמרו הגדרה, העלו קובץ קטן, סגרו ופתחו שוב.
+5. ב־Render בצעו **Manual Deploy → Deploy latest commit**. ודאו שהנתון והקובץ נשארו.
+6. ודאו ב־Supabase שהרשומה קיימת ב־Table Editor והקובץ ב־Storage.
+
+## ה. הפעלת Decision Agent — אופציונלי
+
+ב־Render → Environment הוסיפו:
+
+```text
+OPENAI_AGENT_ENABLED=true
+OPENAI_API_KEY=<OpenAI API key של השרת>
+OPENAI_MODEL=<מודל הזמין בפרויקט ה-API שלכם>
+```
+
+לחצו **Save, rebuild, and deploy**. אל תדביקו את המפתח ב־GitHub או במסך האפליקציה. OpenAI API עשוי להיות בתשלום; כאשר ה־Agent כבוי, כל שאר המערכת ממשיכה לפעול.
+
+## ו. התחלת העבודה
+
+1. העלו אסטרטגיה ויעדי Q9 תחת `Setup`.
+2. העלו ואשרו בנפרד Q1, Q2 ו־Q3.
+3. בחרו Q4 בחלק העליון.
+4. בדקו מצב כספי, תחזית Q9 והמלצות.
+5. הריצו תרחישים לפני החלטות.
+6. הורידו גיבוי מלא.
+
+## תקלות נפוצות
+
+- `Supabase ... missing` — משתנה חסר ב־Render.
+- `permission denied` — הוזן anon key במקום Secret/service-role.
+- `relation does not exist` — schema/migration לא הורץ במלואו.
+- Agent לא זמין — הוא כבוי או שחסרים `OPENAI_API_KEY`/`OPENAI_MODEL`.
+- PDF לא חולץ — ייתכן שהוא סרוק; הקובץ נשמר ומסומן לבדיקת OCR.
+- פתיחה ראשונה איטית — Render Free עשוי להתעורר משינה.
+
+בכל שינוי Environment יש לבחור **Save, rebuild, and deploy**.
