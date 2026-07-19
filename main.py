@@ -24,6 +24,7 @@ import db
 from agent_service import agent_status, analyze_rule_candidates, run_agent
 from analytics import (
     analyze_decision_dependencies,
+    build_execution_blueprint,
     build_scorecard,
     financial_position,
     q9_forecast,
@@ -340,7 +341,28 @@ def _intelligence(quarter: str) -> dict[str, Any]:
             "הסבר את ההשפעה על רווח, מזומן, חוב, תקציב וציון Q9; "
             "השווה לחלופה שמרנית והצע סדר פעולות."
         )
-    recommendation_actions = [
+    liquidity_actions = []
+    for transfer in financial.get("liquidity_allocation", {}).get("transfers", []):
+        action = {
+            **transfer.get("action_template", {}),
+            **{
+                key: value
+                for key, value in transfer.items()
+                if key not in {"action_template"}
+            },
+            "_recommendation_id": f"{quarter}-liquidity-{transfer.get('priority')}",
+            "title": (
+                f"העברת נזילות {transfer.get('source_area')} → "
+                f"{transfer.get('target_area')}"
+            ),
+            "expected_outcome": (
+                f"יתרת היעד לאחר ההעברה: "
+                f"{float(transfer.get('target_cash_after_sf') or 0):,.2f} SF"
+            ),
+        }
+        liquidity_actions.append(action)
+
+    recommendation_actions = liquidity_actions + [
         {
             **recommendation.get("action_template", {}),
             "_recommendation_id": recommendation.get("id"),
@@ -353,6 +375,12 @@ def _intelligence(quarter: str) -> dict[str, Any]:
         recommendation_actions,
         latest_operations,
         available_budget_sf=float(baseline.get("available_budget_sf") or 0),
+    )
+    execution_blueprint = build_execution_blueprint(
+        quarter,
+        recommendation_actions,
+        decision_dependencies,
+        recommendations=recs,
     )
     dependency_nodes = {
         str(node.get("id")): node
@@ -419,6 +447,13 @@ def _intelligence(quarter: str) -> dict[str, Any]:
             " אתר תלויות בהחלטות אחרות, תנאים מקדימים, התנגשויות וסדר ביצוע; "
             "אל תנתח את ההחלטה כאילו היא עומדת לבדה."
         )
+    for recommendation in recs:
+        recommendation["execution_steps"] = [
+            row
+            for row in execution_blueprint.get("rows", [])
+            if row.get("recommendation_id") == recommendation.get("id")
+        ]
+
     return {
         "quarter": quarter,
         "financial": financial,
@@ -426,6 +461,7 @@ def _intelligence(quarter: str) -> dict[str, Any]:
         "forecast_q9": forecast,
         "recommendations": recs,
         "decision_dependencies": decision_dependencies,
+        "execution_blueprint": execution_blueprint,
         "latest_operations": latest_operations,
         "optimization_objective": {
             "primary": "מקסום ביצועי המשחק בכל נקודת זמן ועד Q9",
@@ -1421,7 +1457,12 @@ def agent_chat(payload: dict[str, Any]):
         if name == "get_q9_forecast":
             return bundle["forecast_q9"]
         if name == "get_recommendations":
-            return {"recommendations": bundle["recommendations"], "sources": [f"{selected} recommendations"]}
+            return {
+                "recommendations": bundle["recommendations"],
+                "execution_blueprint": bundle.get("execution_blueprint", {}),
+                "decision_dependencies": bundle.get("decision_dependencies", {}),
+                "sources": [f"{selected} recommendations and executable decision blueprint"],
+            }
         if name == "get_relevant_research":
             return relevant_research(selected, str(arguments.get("domain") or ""))
         if name == "get_cumulative_insights":

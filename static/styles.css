@@ -100,6 +100,49 @@ main { padding: 36px clamp(18px, 4vw, 64px) 80px; }
 .dependency-summary-head strong { display: block; margin-top: 3px; color: var(--navy-900); font-size: 16px; }
 .dependency-summary p { margin: 9px 0; color: var(--navy-700); font-size: 12px; line-height: 1.55; }
 .dependency-summary > small { display: block; margin-top: 10px; color: var(--muted); }
+.execution-blueprint-panel { margin: 18px 0; padding: 0; overflow: hidden; border-top: 4px solid var(--gold); }
+.execution-blueprint-panel > .panel-head { padding: 20px 22px 16px; }
+.execution-blueprint-panel .panel-head p { margin: 6px 0 0; }
+.execution-blueprint-counts { display: flex; gap: 7px; flex-wrap: wrap; }
+.execution-count { display: grid; min-width: 70px; padding: 8px 10px; color: var(--navy-700); background: #f4f7f9; border: 1px solid var(--line); border-radius: 9px; text-align: center; font-size: 9px; }
+.execution-count b { color: var(--navy-900); font-size: 17px; }
+.execution-count.ready { background: var(--green-soft); border-color: #b8dfcf; }
+.execution-count.conditional { background: var(--gold-soft); border-color: #ead39d; }
+.execution-count.blocked { background: var(--red-soft); border-color: #e8c6ca; }
+.execution-table-wrap { overflow-x: auto; border-top: 1px solid var(--line); }
+.execution-table { width: 100%; min-width: 1380px; border-collapse: collapse; table-layout: fixed; direction: rtl; }
+.execution-table th { padding: 10px 12px; color: #dce6ee; background: var(--navy-900); font-size: 9px; letter-spacing: .02em; text-align: right; }
+.execution-table th:nth-child(1) { width: 92px; }
+.execution-table th:nth-child(2) { width: 150px; }
+.execution-table th:nth-child(3) { width: 180px; }
+.execution-table th:nth-child(4) { width: 190px; }
+.execution-table th:nth-child(5) { width: 260px; }
+.execution-table th:nth-child(6) { width: 245px; }
+.execution-table th:nth-child(7) { width: 175px; }
+.execution-table th:nth-child(8) { width: 105px; }
+.execution-table td { padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--navy-800); font-size: 10px; line-height: 1.45; }
+.execution-row.ready td:first-child { border-right: 4px solid var(--green); }
+.execution-row.conditional td:first-child { border-right: 4px solid var(--gold); }
+.execution-row.blocked td:first-child { border-right: 4px solid var(--red); }
+.execution-table td > strong,
+.execution-table td > span,
+.execution-table td > small { display: block; }
+.execution-table td p { margin: 7px 0 0; font-size: 10px; }
+.execution-order { display: grid !important; place-items: center; width: 30px; height: 30px; margin-bottom: 5px; color: white; background: var(--teal); border-radius: 50%; font-weight: 800; font-size: 13px; }
+.form-code { display: inline-block !important; width: max-content; margin-top: 6px; padding: 3px 7px; color: var(--teal); background: var(--teal-soft); border-radius: 5px; font-weight: 800; }
+.execution-value { display: block; color: var(--navy-900); font-size: 14px; }
+.execution-status { width: max-content; margin-top: 8px; padding: 4px 7px; border-radius: 999px; font-size: 8px; font-weight: 800; }
+.execution-status.ready { color: #146148; background: var(--green-soft); }
+.execution-status.conditional { color: #795510; background: var(--gold-soft); }
+.execution-status.blocked { color: var(--red); background: var(--red-soft); }
+.dependency-stack { display: grid; gap: 5px; }
+.dependency-chip { display: block; padding: 5px 7px; color: #5c4a20; background: #fff8e8; border-right: 3px solid var(--gold); border-radius: 5px; font-size: 9px; }
+.dependency-chip.hard { color: #7b2832; background: var(--red-soft); border-color: var(--red); }
+.dependency-chip.clear { color: #176b50; background: var(--green-soft); border-color: var(--green); }
+.dependency-stack > small { color: var(--muted); }
+.dependency-stack .unlocks { color: var(--teal); font-weight: 700; }
+.confidence-label { display: block; margin-top: 8px; color: var(--teal); font-weight: 700; }
+.compact-button { min-width: 0; padding: 7px 9px; font-size: 9px; white-space: nowrap; }
 .dependency-sequence { display: flex; align-items: center; gap: 7px; overflow-x: auto; padding-bottom: 3px; }
 .dependency-sequence span { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 7px 9px; border: 1px solid #dfe8ec; border-radius: 999px; color: var(--navy-700); background: white; font-size: 11px; }
 .dependency-sequence span:not(:last-child)::after { content: "←"; margin-right: 5px; color: var(--teal); }

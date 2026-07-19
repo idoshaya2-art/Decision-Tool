@@ -824,6 +824,83 @@ def recommendations(
         add(55, "מחקר", "רכישת מידע לפני החלטה בלתי הפיכה", "לא נמצאו מחקרי שוק מאושרים לרבעון. יש לבחור מחקר לפי החלטת התמחור, הקיבולת או הטכנולוגיה הקרובה.", {"type": "market_research", "cost_sf": 0}, ["research center"], "נמוך")
 
     alignment = "נבדק מול היעדים והמגבלות שחולצו מהאסטרטגיה המאושרת." if has_strategy else "טרם אושר פרופיל אסטרטגיה מובנה; ההתאמה האסטרטגית חלקית."
+    # Convert generic recommendation types into ready-to-simulate INTOPIA
+    # actions whenever the latest approved Actuals provide a concrete scope.
+    pricing_focus = max(
+        latest_ops,
+        key=lambda row: (
+            num(row.get("actual_sales"))
+            * num(row.get("actual_price_lc"))
+            * max(num(row.get("fx_to_sf"), 1.0), 0.000001)
+        ),
+        default={},
+    )
+    technology_focus = min(
+        (row for row in latest_ops if row.get("product") in {"X", "Y"}),
+        key=lambda row: num(row.get("grade"), 99),
+        default=pricing_focus,
+    )
+    for item in result:
+        action = item.get("action_template") or {}
+        action_type = str(action.get("type") or "")
+        if action_type == "price_change":
+            focus = next(
+                (
+                    row
+                    for row in latest_ops
+                    if (not action.get("area") or row.get("area") == action.get("area"))
+                    and (not action.get("product") or row.get("product") == action.get("product"))
+                    and (not action.get("model") or row.get("model") == action.get("model"))
+                ),
+                pricing_focus,
+            )
+            current_price = num(focus.get("actual_price_lc"))
+            change = num(action.get("change_pct"))
+            product = str(action.get("product") or focus.get("product") or "")
+            action.update(
+                {
+                    "code": action.get("code") or ("A1-1" if product == "X" else "A1-2"),
+                    "area": action.get("area") or focus.get("area"),
+                    "product": product,
+                    "model": action.get("model") or focus.get("model"),
+                    "current_price_lc": current_price,
+                    "price_lc": round(current_price * (1 + change), 2) if current_price > 0 else None,
+                }
+            )
+        elif action_type == "rd":
+            product = str(action.get("product") or technology_focus.get("product") or "Y")
+            minimum = MINIMUM_RD_SF.get(product, 70_000)
+            amount = max(minimum, num(action.get("cost_sf")))
+            if budget > 0:
+                amount = min(amount, budget)
+            action.update(
+                {
+                    "code": "H1-1",
+                    "area": "Liechtenstein",
+                    "product": product,
+                    "amount_sf": round(amount, 2),
+                    "cost_sf": round(amount, 2),
+                }
+            )
+        elif action_type == "market_research":
+            product = str(pricing_focus.get("product") or "Y")
+            cost_study = 51 if product == "X" else 61
+            action.update(
+                {
+                    "code": "H1-2",
+                    "area": "Liechtenstein",
+                    "product": product,
+                    "study_ids": [28, cost_study],
+                    "cost_sf": 10_000,
+                    "research_purpose": (
+                        f"אימות מחיר שוק ועלות משתנה למוצר {product} לפני נעילת מחיר וכמות."
+                    ),
+                }
+            )
+        elif action_type == "capacity":
+            action.setdefault("code", "A2-1")
+        item["action_template"] = action
+
     for item in result:
         item["strategy_alignment"] = alignment
         if has_strategy:
@@ -1014,6 +1091,25 @@ def analyze_decision_dependencies(
         product_match = not left["product"] or not right["product"] or left["product"] == right["product"]
         return area_match and product_match
 
+    def research_matches(research: dict[str, Any], decision: dict[str, Any]) -> bool:
+        """Head-office research can inform every operating area for the same product."""
+        research_area = str(research.get("area") or "")
+        decision_area = str(decision.get("area") or "")
+        area_match = (
+            not research_area
+            or research_area == "Liechtenstein"
+            or not decision_area
+            or research_area == decision_area
+        )
+        research_product = str(research.get("product") or "")
+        decision_product = str(decision.get("product") or "")
+        product_match = (
+            not research_product
+            or not decision_product
+            or research_product == decision_product
+        )
+        return area_match and product_match
+
     def add_edge(
         source: dict[str, Any],
         target: dict[str, Any],
@@ -1070,8 +1166,52 @@ def analyze_decision_dependencies(
     )
 
     for node in nodes:
+        if node["type"] == "money_transfer":
+            for candidate in nodes:
+                if (
+                    candidate["type"] in {"currency_conversion", "local_currency_exchange"}
+                    and candidate["area"] in {"", node["area"]}
+                ):
+                    add_edge(
+                        candidate,
+                        node,
+                        kind="funding",
+                        hard=True,
+                        reason="יש להכין את מטבע המקור לפני ביצוע העברה בין אזורים.",
+                        timing="המרת המטבע קודמת להעברה; אחרת סכום הנטו והעמלה אינם ניתנים לביצוע.",
+                    )
+            for candidate in nodes:
+                if (
+                    candidate["id"] != node["id"]
+                    and node["target_area"]
+                    and candidate["area"] == node["target_area"]
+                    and (
+                        candidate["cost_sf"] > 0
+                        or candidate["type"]
+                        in {
+                            "services_payment",
+                            "production",
+                            "rd",
+                            "plant_construction",
+                            "sales_offices",
+                            "advertising",
+                            "price_advertising",
+                        }
+                    )
+                ):
+                    add_edge(
+                        node,
+                        candidate,
+                        kind="funding",
+                        hard=True,
+                        reason=f"הפעולה ב-{node['target_area']} תלויה בנזילות שהועברה מאזור המקור.",
+                        timing="יש להשלים את ההעברה ולאמת את יתרת היעד לפני אישור ההוצאה.",
+                    )
+
         if node["type"] in irreversible_types | expensive_types:
-            matching_research = [candidate for candidate in research_nodes if same_scope(candidate, node)]
+            matching_research = [
+                candidate for candidate in research_nodes if research_matches(candidate, node)
+            ]
             if matching_research:
                 for candidate in matching_research:
                     add_edge(
@@ -1140,6 +1280,37 @@ def analyze_decision_dependencies(
                         timing="מפעל חדש אינו מגדיל את קיבולת הייצור של הרבעון שבו הוקם.",
                     )
 
+        if node["type"] == "production":
+            for candidate in nodes:
+                if candidate["type"] == "industrial_sale" and same_scope(node, candidate):
+                    add_edge(
+                        node,
+                        candidate,
+                        kind="prerequisite",
+                        hard=True,
+                        reason="מכירה תעשייתית מחייבת מלאי זמין; הייצור או המלאי הקיים צריכים להקדים אותה.",
+                        timing="יש לאמת את הכמות הזמינה לאחר הייצור ולפני התחייבות לכמות מכירה.",
+                    )
+
+        if node["type"] == "component_transfer":
+            for candidate in nodes:
+                if (
+                    candidate["type"] == "production"
+                    and candidate["product"] == "X"
+                    and (
+                        candidate["area"] in {"", node["area"]}
+                        or candidate["target_area"] == node["area"]
+                    )
+                ):
+                    add_edge(
+                        candidate,
+                        node,
+                        kind="prerequisite",
+                        hard=True,
+                        reason="העברת שבבי X תלויה בייצור או במלאי X זמין באזור המקור.",
+                        timing="ייצור X → אימות מלאי → העברת X → ייצור Y.",
+                    )
+
         if node["type"] in demand_types:
             for candidate in nodes:
                 if candidate["type"] in supply_types | capacity_types and same_scope(candidate, node):
@@ -1157,6 +1328,18 @@ def analyze_decision_dependencies(
                         kind="coordination",
                         reason="אפקט המחיר והפרסום תלוי גם בכיסוי ובעלות ערוץ המכירה.",
                         timing="בחינת הערוץ לפני קיבוע תקציב השיווק.",
+                    )
+
+        if node["type"] in demand_types:
+            for candidate in research_nodes:
+                if research_matches(candidate, node):
+                    add_edge(
+                        candidate,
+                        node,
+                        kind="prerequisite",
+                        hard=False,
+                        reason="מחקר המחיר, הביקוש או המתחרים צריך לעדכן את החלטת המחיר והפרסום.",
+                        timing="יש לקרוא את תוצאת המחקר לפני נעילת המחיר; ללא מחקר ההמלצה נשארת בטווח ולא בנקודה.",
                     )
 
         if node["cost_sf"] > 0 and total_cost > max(0.0, available_budget_sf):
@@ -1271,6 +1454,388 @@ def analyze_decision_dependencies(
                 "ההמלצות יוצרות מהלך משולב; יש לבצע את התנאים המקדימים לפי הסדר לפני קיבוע פעולות השיווק והייצור."
                 if edges
                 else "לא זוהו תלויות מחייבות; עדיין יש לבדוק את הפעולות יחד מול התקציב ויעד Q9."
+            ),
+        },
+    }
+
+
+def build_execution_blueprint(
+    quarter: str,
+    actions: list[dict[str, Any]],
+    dependency_analysis: dict[str, Any],
+    *,
+    recommendations: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Translate a decision graph into an executable, auditable INTOPIA plan.
+
+    The recommendation cards answer "why".  This blueprint answers "what do
+    we enter, in which form, in what order, and what must happen first".
+    Values remain explicit assumptions when the available evidence is not
+    strong enough for a ready-to-enter number.
+    """
+    recommendations = recommendations or []
+    recommendation_by_id = {
+        str(row.get("id") or ""): row
+        for row in recommendations
+        if row.get("id")
+    }
+    nodes = dependency_analysis.get("nodes", [])
+    node_by_id = {str(row.get("id")): row for row in nodes}
+    action_by_id = {
+        str(node.get("id")): dict(actions[int(node.get("index") or 0)])
+        for node in nodes
+        if 0 <= int(node.get("index") or 0) < len(actions)
+    }
+    sequence_rows = dependency_analysis.get("recommended_sequence", [])
+    step_by_id = {
+        str(row.get("id")): int(row.get("step") or 0)
+        for row in sequence_rows
+    }
+    incoming_by_id: dict[str, list[dict[str, Any]]] = {}
+    outgoing_by_id: dict[str, list[dict[str, Any]]] = {}
+    for edge in dependency_analysis.get("edges", []):
+        incoming_by_id.setdefault(str(edge.get("to")), []).append(edge)
+        outgoing_by_id.setdefault(str(edge.get("from")), []).append(edge)
+    gaps_by_id: dict[str, list[dict[str, Any]]] = {}
+    for gap in dependency_analysis.get("gaps", []):
+        gaps_by_id.setdefault(str(gap.get("action_id")), []).append(gap)
+
+    phase_by_type = {
+        "market_research": "1 · מידע ואימות",
+        "currency_conversion": "1 · נזילות ומימון",
+        "local_currency_exchange": "1 · נזילות ומימון",
+        "money_transfer": "1 · נזילות ומימון",
+        "loan": "1 · נזילות ומימון",
+        "invest_borrow": "1 · נזילות ומימון",
+        "home_office_finance": "1 · נזילות ומימון",
+        "intercompany_loan": "1 · נזילות ומימון",
+        "services_payment": "2 · סגירת התחייבויות",
+        "rd": "2 · טכנולוגיה וקיבולת",
+        "grade_license": "2 · טכנולוגיה וקיבולת",
+        "plant_construction": "2 · טכנולוגיה וקיבולת",
+        "capacity": "2 · טכנולוגיה וקיבולת",
+        "component_transfer": "3 · שרשרת אספקה",
+        "production": "4 · ייצור",
+        "sales_offices": "5 · מסחור",
+        "price_change": "5 · מסחור",
+        "price_advertising": "5 · מסחור",
+        "advertising": "5 · מסחור",
+        "industrial_sale": "5 · מסחור",
+        "factory_sale": "5 · מסחור",
+    }
+
+    def number(value: Any, decimals: int = 0) -> str:
+        amount = num(value)
+        return f"{amount:,.{decimals}f}"
+
+    def base_row(
+        node_id: str,
+        action: dict[str, Any],
+        node: dict[str, Any],
+    ) -> dict[str, Any]:
+        action_type = str(node.get("type") or action.get("type") or "generic")
+        catalog = decision_action(str(action.get("code") or node.get("code") or ""))
+        code = str(action.get("code") or node.get("code") or catalog.get("code") or "—")
+        area = str(action.get("area") or node.get("area") or "Liechtenstein")
+        recommendation = recommendation_by_id.get(node_id, {})
+        dependencies = []
+        for edge in incoming_by_id.get(node_id, []):
+            source_id = str(edge.get("from"))
+            source = node_by_id.get(source_id, {})
+            dependencies.append(
+                {
+                    "id": source_id,
+                    "step": step_by_id.get(source_id),
+                    "title": source.get("title") or source_id,
+                    "kind": edge.get("kind"),
+                    "hard": bool(edge.get("hard")),
+                    "reason": edge.get("reason") or "",
+                    "timing": edge.get("timing") or "",
+                }
+            )
+        gaps = gaps_by_id.get(node_id, [])
+        is_specific = any(
+            action.get(field) not in (None, "", [])
+            for field in (
+                "amount_sf",
+                "source_amount_lc",
+                "price_lc",
+                "units",
+                "cost_sf",
+                "study_id",
+                "study_ids",
+                "plant_count",
+                "office_delta",
+                "grade",
+            )
+        )
+        blocked = bool(gaps) or any(
+            dep.get("hard") and dep.get("step") is None
+            for dep in dependencies
+        )
+        conditional_types = {
+            "capacity",
+            "plant_construction",
+            "grade_license",
+            "factory_sale",
+            "strategy_review",
+        }
+        status = "blocked" if blocked else (
+            "conditional" if action_type in conditional_types or not is_specific else "ready"
+        )
+        decision_type = "חובה" if status == "ready" and (
+            action_type in {"money_transfer", "currency_conversion", "services_payment"}
+            or any(dep.get("hard") for dep in dependencies)
+        ) else ("מותנה" if status == "conditional" else ("חסום" if status == "blocked" else "מומלץ"))
+        return {
+            "id": node_id,
+            "sequence": step_by_id.get(node_id, 0),
+            "phase": phase_by_type.get(action_type, "6 · החלטות משלימות"),
+            "recommendation_id": node_id if node_id in recommendation_by_id else "",
+            "area": area,
+            "target_area": str(action.get("target_area") or node.get("target_area") or ""),
+            "form_code": code,
+            "action_name": str(
+                action.get("title")
+                or node.get("title")
+                or catalog.get("title")
+                or action_type
+            ),
+            "action_type": action_type,
+            "decision_type": decision_type,
+            "status": status,
+            "status_label": {
+                "ready": "מוכן להזנה",
+                "conditional": "מותנה באישור",
+                "blocked": "חסום עד השלמה",
+            }[status],
+            "gate": (
+                "יש להשלים תחילה את התלויות המסומנות."
+                if dependencies
+                else "אין תלות מוקדמת שזוהתה."
+            ),
+            "dependencies": dependencies,
+            "coordinates_with": [
+                {
+                    "id": other_id,
+                    "step": step_by_id.get(other_id),
+                    "title": node_by_id.get(other_id, {}).get("title") or other_id,
+                }
+                for other_id in (
+                    next(
+                        (
+                            row.get("coordinates_with", [])
+                            for row in sequence_rows
+                            if str(row.get("id")) == node_id
+                        ),
+                        [],
+                    )
+                )
+            ],
+            "unlocks": [
+                {
+                    "id": str(edge.get("to")),
+                    "step": step_by_id.get(str(edge.get("to"))),
+                    "title": node_by_id.get(str(edge.get("to")), {}).get("title") or edge.get("to"),
+                }
+                for edge in outgoing_by_id.get(node_id, [])
+                if edge.get("kind") != "coordination"
+            ],
+            "gaps": gaps,
+            "source": " · ".join(str(item) for item in recommendation.get("evidence", []) if item)
+            or "נתוני Actual, Rulebook ומודל החלטות",
+            "confidence": (
+                recommendation.get("ai_recommendation", {}).get("confidence")
+                or ("גבוהה" if status == "ready" else "בינונית")
+            ),
+            "cost_sf": round(max(0.0, num(action.get("cost_sf"))), 2),
+            "action": action,
+        }
+
+    rows: list[dict[str, Any]] = []
+    for sequence in sequence_rows:
+        node_id = str(sequence.get("id"))
+        node = node_by_id.get(node_id, {})
+        action = action_by_id.get(node_id, {})
+        if not node or not action:
+            continue
+        row = base_row(node_id, action, node)
+        action_type = row["action_type"]
+        area = row["area"]
+        target_area = row["target_area"]
+
+        if action_type == "money_transfer":
+            source_currency = str(action.get("source_currency") or action.get("currency") or "")
+            source_amount = num(action.get("source_amount_lc"))
+            net_sf = num(action.get("net_amount_sf"), num(action.get("amount_sf")))
+            gross_sf = num(action.get("gross_source_amount_sf"), net_sf + num(action.get("cost_sf")))
+            fee_sf = num(action.get("estimated_fx_fee_sf"), num(action.get("cost_sf")))
+            recommended_transfer_value = (
+                f"{number(source_amount, 2)} {source_currency}"
+                if source_amount > 0 and source_currency
+                else f"{number(net_sf, 2)} SF נטו"
+            )
+            row.update(
+                {
+                    "field_name": "סכום העברה בין אזורים",
+                    "recommended_value": recommended_transfer_value,
+                    "raw_value": source_amount if source_amount > 0 else net_sf,
+                    "unit": source_currency or "SF",
+                    "gate": (
+                        f"העברה {area} → {target_area}. יש לבצע לפני הוצאה באזור היעד; "
+                        f"כולל עמלת מט״ח משוערת {number(fee_sf, 2)} SF."
+                    ),
+                    "expected_outcome": (
+                        f"{number(net_sf, 2)} SF נטו יעמדו ב-{target_area}; "
+                        f"ב-{area} יישארו {number(action.get('source_cash_after_sf'), 2)} SF."
+                    ),
+                    "input_instruction": (
+                        f"בטופס {row['form_code']} בחר מקור {area}, יעד {target_area}, "
+                        f"מטבע {source_currency or 'המקור'} והזן {recommended_transfer_value}."
+                    ),
+                    "cost_sf": round(fee_sf, 2),
+                }
+            )
+        elif action_type in {"currency_conversion", "local_currency_exchange"}:
+            value = num(action.get("amount_lc"), num(action.get("amount_sf")))
+            row.update(
+                {
+                    "field_name": "המרת מטבע",
+                    "recommended_value": f"{number(value, 2)} {action.get('currency') or 'מטבע מקומי'}",
+                    "raw_value": value,
+                    "unit": str(action.get("currency") or ""),
+                    "expected_outcome": "הכנת המטבע הנדרש להעברה או לתשלום הבא בשרשרת.",
+                    "input_instruction": f"בטופס {row['form_code']} המר את הסכום לפני פעולת ההעברה התלויה בו.",
+                }
+            )
+        elif action_type in {"price_change", "price_advertising", "advertising"}:
+            current_price = num(action.get("current_price_lc"))
+            proposed_price = num(action.get("price_lc"))
+            change = num(action.get("change_pct"))
+            if proposed_price <= 0 and current_price > 0:
+                proposed_price = current_price * (1 + change)
+            row.update(
+                {
+                    "field_name": f"מחיר {action.get('product') or ''} {action.get('model') or ''}".strip(),
+                    "recommended_value": (
+                        f"{number(proposed_price, 2)} במטבע מקומי"
+                        if proposed_price > 0
+                        else f"שינוי של {change:+.1%}"
+                    ),
+                    "raw_value": proposed_price if proposed_price > 0 else change,
+                    "unit": "מטבע מקומי",
+                    "gate": "יש לתאם עם כמות הייצור, המלאי והפרסום באותו שוק.",
+                    "expected_outcome": (
+                        f"שינוי מחיר של {change:+.1%}; ההשפעה הסופית תלויה באלסטיות ובמחירי המתחרים."
+                    ),
+                    "input_instruction": f"בטופס {row['form_code']} הזן את המחיר המומלץ ובדוק במקביל את תקציב הפרסום.",
+                }
+            )
+        elif action_type == "market_research":
+            study_ids = action.get("study_ids") or [action.get("study_id")]
+            study_ids = [item for item in study_ids if item not in (None, "")]
+            if not study_ids:
+                study_ids = ["נדרש לבחור מחקר רלוונטי"]
+                row["status"] = "conditional"
+                row["status_label"] = "מותנה בבחירת מחקר"
+                row["decision_type"] = "מותנה"
+            for position, study_id in enumerate(study_ids, start=1):
+                study_row = dict(row)
+                study_row["id"] = f"{node_id}-mr-{position}"
+                study_row.update(
+                    {
+                        "field_name": f"Market Research {position}",
+                        "recommended_value": f"MR{study_id}" if str(study_id).isdigit() else str(study_id),
+                        "raw_value": study_id,
+                        "unit": "מספר מחקר",
+                        "gate": "יש להזמין לפני החלטה יקרה או בלתי הפיכה שהמחקר עשוי לשנות.",
+                        "expected_outcome": str(
+                            action.get("research_purpose")
+                            or "צמצום אי-הוודאות והגדרת נקודת היפוך להחלטה."
+                        ),
+                        "input_instruction": f"בטופס {row['form_code']} בחר מחקר {study_id}.",
+                    }
+                )
+                rows.append(study_row)
+            continue
+        elif action_type == "rd":
+            amount = max(num(action.get("amount_sf")), num(action.get("cost_sf")))
+            row.update(
+                {
+                    "field_name": f"מו״פ למוצר {action.get('product') or 'X/Y'}",
+                    "recommended_value": f"{number(amount, 0)} SF" if amount > 0 else "נדרש תקציב מאושר",
+                    "raw_value": amount if amount > 0 else None,
+                    "unit": "SF",
+                    "gate": "יש להבטיח מימון ורצפת מזומן לפני ההשקעה.",
+                    "expected_outcome": "שיפור פוטנציאל הטכנולוגיה והיכולת להגיע ליעד Q9.",
+                    "input_instruction": f"בטופס {row['form_code']} הזן את תקציב המו״פ לאחר אישור מקורות המימון.",
+                }
+            )
+        elif action_type in {"production", "component_transfer", "industrial_sale"}:
+            units = num(action.get("units"))
+            row.update(
+                {
+                    "field_name": (
+                        "כמות ייצור"
+                        if action_type == "production"
+                        else ("כמות שבבים להעברה" if action_type == "component_transfer" else "כמות מכירה תעשייתית")
+                    ),
+                    "recommended_value": f"{number(units, 0)} יחידות" if units > 0 else "נדרש חישוב כמות",
+                    "raw_value": units if units > 0 else None,
+                    "unit": "יחידות",
+                    "gate": (
+                        "ייצור Y מותנה בזמינות X מתאים ובקיבולת; מכירה מותנית במלאי זמין."
+                        if str(action.get("product") or "") == "Y" or action_type == "industrial_sale"
+                        else "יש לבדוק קיבולת, מלאי וביקוש לפני אישור הכמות."
+                    ),
+                    "expected_outcome": str(action.get("expected_outcome") or "איזון בין זמינות, מכירות ומלאי סוף רבעון."),
+                    "input_instruction": f"בטופס {row['form_code']} הזן את הכמות רק לאחר השלמת התלויות המוצגות.",
+                }
+            )
+        else:
+            candidates = [
+                ("amount_sf", "סכום", "SF"),
+                ("plant_count", "מספר מפעלים", "מפעלים"),
+                ("office_delta", "שינוי במספר משרדים", "משרדים"),
+                ("grade", "רמה טכנולוגית", "רמה"),
+                ("capacity_units", "תוספת קיבולת", "יחידות"),
+            ]
+            field, label, unit = next(
+                ((field, label, unit) for field, label, unit in candidates if action.get(field) not in (None, "")),
+                ("", "פרמטר החלטה", ""),
+            )
+            value = action.get(field) if field else None
+            row.update(
+                {
+                    "field_name": label,
+                    "recommended_value": number(value, 2) if value is not None else "נדרש אישור מספרי",
+                    "raw_value": value,
+                    "unit": unit,
+                    "expected_outcome": str(action.get("expected_outcome") or "השפעה תיבדק בסימולציה לפני אישור."),
+                    "input_instruction": f"פתח את טופס {row['form_code']}, אמת את התנאי והזן את הערך המאושר.",
+                }
+            )
+        rows.append(row)
+
+    rows.sort(key=lambda row: (int(row.get("sequence") or 0), str(row.get("id"))))
+    for index, row in enumerate(rows, start=1):
+        row["order"] = index
+    ready_count = sum(1 for row in rows if row.get("status") == "ready")
+    conditional_count = sum(1 for row in rows if row.get("status") == "conditional")
+    blocked_count = sum(1 for row in rows if row.get("status") == "blocked")
+    return {
+        "quarter": quarter,
+        "rows": rows,
+        "summary": {
+            "row_count": len(rows),
+            "ready_count": ready_count,
+            "conditional_count": conditional_count,
+            "blocked_count": blocked_count,
+            "dependency_count": len(dependency_analysis.get("edges", [])),
+            "planned_cash_out_sf": round(sum(num(row.get("cost_sf")) for row in rows), 2),
+            "headline": (
+                f"{ready_count} פעולות מוכנות להזנה, {conditional_count} מותנות ו-{blocked_count} חסומות. "
+                "יש לעבוד לפי הסדר; כל שורה מסבירה מה מזינים ומה היא פותחת."
             ),
         },
     }

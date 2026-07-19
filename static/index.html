@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>EMBA TAU Simulation</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=1.1.5">
+  <link rel="stylesheet" href="/static/styles.css?v=1.1.6">
 </head>
 <body>
   <header class="topbar">
@@ -66,6 +66,34 @@
           <div><span>50% פוטנציאל עתידי</span><strong id="futureScore">—</strong><small id="futureCoverage">כיסוי נתונים —</small></div>
           <div><span>תקציב פנוי להחלטות</span><strong id="availableBudget">—</strong><small>לאחר התחייבויות ורזרבה</small></div>
         </div>
+        <article class="panel execution-blueprint-panel">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">EXECUTION BLUEPRINT</span>
+              <h2>תכנית הביצוע המדויקת לרבעון</h2>
+              <p id="executionBlueprintHeadline">מכין את סדר הפעולות, הערכים והתלויות…</p>
+            </div>
+            <div id="executionBlueprintCounts" class="execution-blueprint-counts"></div>
+          </div>
+          <div class="execution-table-wrap">
+            <table class="execution-table">
+              <thead>
+                <tr>
+                  <th>סדר</th>
+                  <th>אזור וטופס</th>
+                  <th>שדה / פעולה</th>
+                  <th>מה להזין</th>
+                  <th>תנאי ותלות</th>
+                  <th>תוצאה צפויה</th>
+                  <th>מקור וביטחון</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="executionBlueprintRows"></tbody>
+            </table>
+          </div>
+          <div id="executionBlueprintEmpty" class="empty-copy hidden">אין עדיין תכנית מספרית. אשרו את Q1–Q3 ואת האסטרטגיה כדי לייצר אותה.</div>
+        </article>
         <div class="dashboard-grid">
           <article class="panel decision-panel">
             <div class="panel-head"><div><span class="panel-kicker">FOCUS</span><h2>החלטות שדורשות דיון עכשיו</h2></div><span class="soft-pill">עד 5</span></div>
@@ -379,6 +407,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js?v=1.1.5" defer></script>
+  <script src="/static/app.js?v=1.1.6" defer></script>
 </body>
 </html>

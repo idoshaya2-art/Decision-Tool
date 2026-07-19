@@ -168,6 +168,52 @@ function fieldRecommendation(input) {
     value, rawValue, reason, source, confidence,
   });
 
+  if (formId === "actionForm") {
+    const code = $("#actionForm [name=code]")?.value;
+    const form = input.form;
+    const area = form?.elements?.area?.value;
+    const product = form?.elements?.product?.value;
+    const model = form?.elements?.model?.value;
+    const blueprintRows = state.intelligence?.execution_blueprint?.rows || [];
+    const blueprint = blueprintRows.find(row =>
+      row.form_code === code &&
+      (!area || row.area === area) &&
+      (!product || !row.action?.product || row.action.product === product) &&
+      (!model || !row.action?.model || row.action.model === model)
+    ) || blueprintRows.find(row => row.form_code === code);
+    if (blueprint) {
+      const directValue = blueprint.action?.[name];
+      const specialValues = {
+        study_id: blueprint.raw_value,
+        area: blueprint.area,
+        target_area: blueprint.target_area,
+        amount_sf: blueprint.action?.amount_sf,
+        cost_sf: blueprint.cost_sf,
+      };
+      const rawValue = directValue ?? specialValues[name];
+      if (rawValue !== undefined && rawValue !== null && rawValue !== "") {
+        const dependencies = (blueprint.dependencies || [])
+          .map(item => `שלב ${item.step || "—"} ${item.title}`)
+          .join(", ");
+        const formatted = typeof rawValue === "number"
+          ? (name.endsWith("_sf") ? sf(rawValue) : fmt(rawValue, 2))
+          : String(rawValue);
+        return result(
+          formatted,
+          rawValue,
+          [
+            blueprint.input_instruction,
+            blueprint.gate,
+            dependencies ? `תלוי ב: ${dependencies}.` : "",
+            blueprint.expected_outcome ? `תוצאה צפויה: ${blueprint.expected_outcome}` : "",
+          ].filter(Boolean).join(" "),
+          blueprint.source || "תכנית הביצוע לרבעון",
+          blueprint.confidence || "בינונית",
+        );
+      }
+    }
+  }
+
   if (input.type === "file") {
     return result(
       "הקובץ המקורי המלא",
@@ -382,7 +428,49 @@ function renderScoreAndForecast() {
   $("#scenarioBudgetLabel").textContent = `תקציב ${sf(financial.available_budget_sf)}`;
 }
 
+function renderExecutionBlueprint() {
+  const blueprint = state.intelligence?.execution_blueprint || {};
+  const rows = blueprint.rows || [];
+  const summary = blueprint.summary || {};
+  const empty = $("#executionBlueprintEmpty");
+  const table = $(".execution-table-wrap");
+  $("#executionBlueprintHeadline").textContent = summary.headline || "לא זוהו עדיין מספיק נתונים ליצירת תכנית מספרית.";
+  $("#executionBlueprintCounts").innerHTML = [
+    ["ready", "מוכן", summary.ready_count || 0],
+    ["conditional", "מותנה", summary.conditional_count || 0],
+    ["blocked", "חסום", summary.blocked_count || 0],
+  ].map(([level, label, value]) => `<span class="execution-count ${level}"><b>${fmt(value)}</b>${label}</span>`).join("");
+  empty.classList.toggle("hidden", rows.length > 0);
+  table.classList.toggle("hidden", rows.length === 0);
+  $("#executionBlueprintRows").innerHTML = rows.map((row, index) => {
+    const dependencies = row.dependencies || [];
+    const coordinates = row.coordinates_with || [];
+    const unlocks = row.unlocks || [];
+    const dependencyHtml = dependencies.length
+      ? dependencies.map(item => `<span class="dependency-chip ${item.hard ? "hard" : ""}">תלוי בשלב ${fmt(item.step || "—")}: ${esc(item.title)}</span>`).join("")
+      : '<span class="dependency-chip clear">ללא תנאי מוקדם</span>';
+    const coordinationHtml = coordinates.length
+      ? `<small>לתאם עם: ${coordinates.map(item => `שלב ${fmt(item.step || "—")} ${esc(item.title)}`).join(" · ")}</small>`
+      : "";
+    const unlocksHtml = unlocks.length
+      ? `<small class="unlocks">פותח: ${unlocks.map(item => `שלב ${fmt(item.step || "—")} ${esc(item.title)}`).join(" · ")}</small>`
+      : "";
+    const canSimulate = row.action && !["strategy_review", "cash_protection"].includes(row.action_type);
+    return `<tr class="execution-row ${esc(row.status || "conditional")}">
+      <td><span class="execution-order">${fmt(row.order || index + 1)}</span><small>${esc(row.phase || "")}</small></td>
+      <td><strong>${esc(row.area || "—")}${row.target_area ? ` → ${esc(row.target_area)}` : ""}</strong><span class="form-code">${esc(row.form_code || "—")}</span></td>
+      <td><strong>${esc(row.field_name || row.action_name || "—")}</strong><small>${esc(row.action_name || "")}</small></td>
+      <td><b class="execution-value">${esc(row.recommended_value || "נדרש אישור")}</b><span class="execution-status ${esc(row.status || "conditional")}">${esc(row.status_label || "")} · ${esc(row.decision_type || "")}</span></td>
+      <td><div class="dependency-stack">${dependencyHtml}${coordinationHtml}${unlocksHtml}</div><p>${esc(row.gate || "")}</p></td>
+      <td><p>${esc(row.expected_outcome || "")}</p><small>${esc(row.input_instruction || "")}</small></td>
+      <td><small>${esc(row.source || "")}</small><span class="confidence-label">ודאות ${esc(row.confidence || "בינונית")}</span></td>
+      <td>${canSimulate ? `<button class="button secondary compact-button" type="button" data-add-blueprint="${index}">לסימולציה</button>` : ""}</td>
+    </tr>`;
+  }).join("");
+}
+
 function renderRecommendations() {
+  renderExecutionBlueprint();
   const rows = state.intelligence?.recommendations || [];
   const graph = state.intelligence?.decision_dependencies || {};
   const sequence = graph.recommended_sequence || [];
@@ -1202,6 +1290,16 @@ function bindReportsAndResearch() {
 
 function bindSimulation() {
   $("#actionForm [name=code]").addEventListener("change", configureActionForm);
+  $("#executionBlueprintRows").addEventListener("click", event => {
+    const index = event.target.dataset.addBlueprint;
+    if (index == null) return;
+    const row = state.intelligence?.execution_blueprint?.rows?.[Number(index)];
+    if (!row?.action) return;
+    state.actions.push({...row.action, title: row.action_name || row.action.title});
+    renderActionBasket();
+    showSection("simulation");
+    toast(`שלב ${row.order}: ${row.action_name} נוסף לסימולציה`);
+  });
   $("#actionForm").addEventListener("submit", event => {
     event.preventDefault();
     const action = formPayload(event.target);

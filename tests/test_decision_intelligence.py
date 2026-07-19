@@ -3,7 +3,12 @@ from __future__ import annotations
 import io
 import zipfile
 
-from analytics import financial_position, liquidity_allocation_plan
+from analytics import (
+    analyze_decision_dependencies,
+    build_execution_blueprint,
+    financial_position,
+    liquidity_allocation_plan,
+)
 
 
 def _seed_q1_to_q3(client):
@@ -299,6 +304,170 @@ def test_decisions_expose_dependencies_and_execution_order(client):
     )
     ordered_ids = [row["action"]["code"] for row in result["recommended_sequence"]]
     assert ordered_ids.index("A2-3") < ordered_ids.index("A2-4")
+
+
+def test_execution_blueprint_has_exact_values_and_hard_dependencies():
+    actions = [
+        {
+            "code": "A3-1",
+            "type": "money_transfer",
+            "area": "Brazil",
+            "target_area": "Europe",
+            "source_currency": "BRL",
+            "target_currency": "EUR",
+            "source_amount_lc": 864_766.63,
+            "net_amount_sf": 428_924.25,
+            "gross_source_amount_sf": 432_383.32,
+            "estimated_fx_fee_sf": 3_459.07,
+            "amount_sf": 428_924.25,
+            "cost_sf": 3_459.07,
+            "source_cash_after_sf": 615_068.68,
+            "target_cash_after_sf": 428_924.25,
+            "_recommendation_id": "transfer-eu",
+            "title": "Brazil → Europe liquidity",
+        },
+        {
+            "code": "H1-1",
+            "type": "rd",
+            "area": "Europe",
+            "product": "Y",
+            "amount_sf": 120_000,
+            "cost_sf": 120_000,
+            "_recommendation_id": "rd-y",
+            "title": "Y research and development",
+        },
+    ]
+    graph = analyze_decision_dependencies(
+        "Q4",
+        actions,
+        [],
+        available_budget_sf=500_000,
+    )
+    assert any(
+        edge["from"] == "transfer-eu"
+        and edge["to"] == "rd-y"
+        and edge["kind"] == "funding"
+        and edge["hard"] is True
+        for edge in graph["edges"]
+    )
+    blueprint = build_execution_blueprint("Q4", actions, graph)
+    transfer = next(row for row in blueprint["rows"] if row["id"] == "transfer-eu")
+    rd = next(row for row in blueprint["rows"] if row["id"] == "rd-y")
+    assert transfer["form_code"] == "A3-1"
+    assert transfer["recommended_value"] == "864,766.63 BRL"
+    assert "864,766.63 BRL" in transfer["input_instruction"]
+    assert "None" not in transfer["input_instruction"]
+    assert "428,924.25 SF" in transfer["expected_outcome"]
+    assert rd["recommended_value"] == "120,000 SF"
+    assert rd["dependencies"][0]["id"] == "transfer-eu"
+    assert transfer["order"] < rd["order"]
+
+
+def test_execution_blueprint_links_x_supply_to_y_and_industrial_sale():
+    actions = [
+        {
+            "code": "A2-3",
+            "type": "production",
+            "area": "US",
+            "product": "X",
+            "units": 1_000,
+            "cost_sf": 50_000,
+            "id": "x-production",
+        },
+        {
+            "code": "A4",
+            "type": "component_transfer",
+            "area": "US",
+            "target_area": "Europe",
+            "product": "X",
+            "units": 800,
+            "cost_sf": 10_000,
+            "id": "x-transfer",
+        },
+        {
+            "code": "A2-4",
+            "type": "production",
+            "area": "Europe",
+            "product": "Y",
+            "units": 400,
+            "x_grade": 5,
+            "grade": 5,
+            "cost_sf": 100_000,
+            "id": "y-production",
+        },
+        {
+            "code": "H6",
+            "type": "industrial_sale",
+            "area": "Europe",
+            "product": "Y",
+            "units": 300,
+            "id": "y-sale",
+        },
+    ]
+    graph = analyze_decision_dependencies(
+        "Q4",
+        actions,
+        [],
+        available_budget_sf=500_000,
+    )
+    edges = {(row["from"], row["to"], row["kind"]) for row in graph["edges"]}
+    assert ("x-production", "x-transfer", "prerequisite") in edges
+    assert ("x-transfer", "y-production", "prerequisite") in edges
+    assert ("y-production", "y-sale", "prerequisite") in edges
+    order = [row["id"] for row in graph["recommended_sequence"]]
+    assert order.index("x-production") < order.index("x-transfer")
+    assert order.index("x-transfer") < order.index("y-production")
+    assert order.index("y-production") < order.index("y-sale")
+
+
+def test_head_office_market_research_informs_regional_pricing():
+    actions = [
+        {
+            "code": "H1-2",
+            "type": "market_research",
+            "area": "Liechtenstein",
+            "product": "Y",
+            "studies": [28, 61],
+            "id": "research-y",
+        },
+        {
+            "code": "A1-2",
+            "type": "price_advertising",
+            "area": "Europe",
+            "product": "Y",
+            "id": "price-y-europe",
+        },
+    ]
+    graph = analyze_decision_dependencies(
+        "Q4",
+        actions,
+        [],
+        available_budget_sf=100_000,
+    )
+    edges = {(row["from"], row["to"], row["kind"]) for row in graph["edges"]}
+    assert ("research-y", "price-y-europe", "prerequisite") in edges
+
+
+def test_intelligence_returns_execution_blueprint(client):
+    _seed_q1_to_q3(client)
+    data = client.get("/api/intelligence/Q4").json()
+    blueprint = data["execution_blueprint"]
+    assert blueprint["rows"]
+    assert blueprint["summary"]["row_count"] == len(blueprint["rows"])
+    assert all(
+        {
+            "order",
+            "form_code",
+            "field_name",
+            "recommended_value",
+            "status",
+            "gate",
+            "expected_outcome",
+            "input_instruction",
+            "dependencies",
+        }.issubset(row)
+        for row in blueprint["rows"]
+    )
 
 
 def test_strategy_optimization_rolls_from_latest_actual_to_q9(client):
