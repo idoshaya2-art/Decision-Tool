@@ -1,0 +1,18 @@
+EMBA TAU Simulation AI Decision OS v1.0 — START HERE
+
+שדרוג מהמערכת שכבר פועלת:
+1. הורידו גיבוי מלא מהאפליקציה הקיימת.
+2. פתחו DEPLOY_v1.0_STEP_BY_STEP_HE.md.
+3. הריצו פעם אחת ב-Supabase את supabase/migration_v1.0.sql.
+4. החליפו ב-GitHub את קובצי האפליקציה בגרסת v1.0.
+5. ב-Render ודאו OPENAI_AGENT_ENABLED=true והזינו OPENAI_API_KEY כסוד.
+6. בצעו Deploy latest commit ובדקו /api/health וגם /api/rulebook.
+
+התקנה חדשה:
+1. הריצו ב-Supabase את supabase/schema.sql.
+2. העלו את תוכן התיקייה לשורש GitHub.
+3. צרו Render Blueprint מהקובץ render.yaml.
+4. הזינו רק את הסודות המבוקשים ב-Render.
+
+אין להעלות ל-GitHub:
+.env, מפתחות API, קובצי Q1-Q9 אמיתיים, גיבויים או סיסמאות.

@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>EMBA TAU Simulation</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css?v=1.0.1">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-row">
+      <button id="menuButton" class="icon-button" type="button" aria-label="פתיחת תפריט" aria-expanded="false">☰</button>
+      <div class="brand-mark">EM</div>
+      <div class="brand-copy"><strong>EMBA TAU Simulation</strong><small>Decision Intelligence Platform</small></div>
+    </div>
+    <div class="top-actions">
+      <label class="quarter-picker">רבעון פעיל <select id="quarterSelect" aria-label="בחירת רבעון"></select></label>
+      <span id="saveState" class="status-chip">מוכן</span>
+      <span id="cloudState" class="status-chip"><i></i> בודק ענן…</span>
+    </div>
+  </header>
+
+  <nav class="primary-tabs" aria-label="מסכי עבודה מרכזיים">
+    <button class="primary-tab active" data-section="dashboard" type="button"><span>01</span>חדר החלטות</button>
+    <button class="primary-tab" data-section="agent" type="button"><span>02</span>צ׳אט AI</button>
+    <button class="primary-tab" data-section="finance" type="button"><span>03</span>מצב פיננסי</button>
+    <button class="primary-tab" data-section="reports" type="button"><span>04</span>תובנות ומגמות</button>
+    <button class="primary-tab" data-section="decisionlog" type="button"><span>05</span>לוג החלטות</button>
+    <button class="primary-tab" data-section="settings" type="button"><span>06</span>הגדרות</button>
+  </nav>
+
+  <div id="menuOverlay" class="menu-overlay" hidden></div>
+  <div id="appShell" class="app-shell">
+    <aside id="sideNav" class="side-nav" aria-label="ניווט ראשי" aria-hidden="true">
+      <div class="nav-heading">ניווט</div>
+      <button class="nav-item active" data-section="dashboard">חדר החלטות</button>
+      <button class="nav-item" data-section="agent">צ׳אט AI והעלאת קבצים</button>
+      <button class="nav-item" data-section="finance">מצב פיננסי</button>
+      <button class="nav-item" data-section="reports">תובנות ומגמות</button>
+      <button class="nav-item" data-section="decisionlog">לוג החלטות</button>
+      <button class="nav-item" data-section="settings">הגדרות</button>
+      <div class="nav-heading nav-secondary-heading">כלי אנליסט</div>
+      <button class="nav-item secondary-nav" data-section="simulation">מעבדת תרחישים</button>
+      <button class="nav-item secondary-nav" data-section="economics">תמחור וכלכלת יחידה</button>
+      <button class="nav-item secondary-nav" data-section="files">מרכז קבצים וקליטה</button>
+      <button class="nav-item secondary-nav" data-section="rules">מרכז החוקים</button>
+      <button class="nav-item secondary-nav" data-section="guide">מדריך שימוש</button>
+      <button class="nav-item secondary-nav" data-section="backup">גיבוי ושחזור</button>
+      <div class="nav-foot">AI Decision OS v1.0<br><span>Supabase · Rulebook · OpenAI</span></div>
+    </aside>
+
+    <main>
+      <section id="section-dashboard" class="page active">
+        <div class="page-head">
+          <div><p class="eyebrow">Q4 PLANNING ROOM</p><h1>חדר החלטות</h1><p>תמונת פתיחה המבוססת על Q1–Q3 ומסתכלת תמיד עד Q9.</p></div>
+          <button id="refreshButton" class="button secondary" type="button">רענון נתונים</button>
+        </div>
+        <div id="setupNotice" class="notice hidden"><strong>כדי להתחיל:</strong> העלו ואשרו בנפרד את דוחות Q1, Q2 ו־Q3.</div>
+        <div class="q9-strip">
+          <div><span>תחזית Q9</span><strong id="q9Score">—</strong><small id="q9Confidence">ממתין לנתונים</small></div>
+          <div><span>50% ביצועי עבר</span><strong id="pastScore">—</strong><small id="pastCoverage">כיסוי נתונים —</small></div>
+          <div><span>50% פוטנציאל עתידי</span><strong id="futureScore">—</strong><small id="futureCoverage">כיסוי נתונים —</small></div>
+          <div><span>תקציב פנוי להחלטות</span><strong id="availableBudget">—</strong><small>לאחר התחייבויות ורזרבה</small></div>
+        </div>
+        <div class="dashboard-grid">
+          <article class="panel decision-panel">
+            <div class="panel-head"><div><span class="panel-kicker">FOCUS</span><h2>החלטות שדורשות דיון עכשיו</h2></div><span class="soft-pill">עד 5</span></div>
+            <div id="decisionDependencySummary" class="dependency-summary"></div>
+            <div id="recommendationsList" class="recommendation-list"></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><span class="panel-kicker">FINANCIAL HEALTH</span><h2>מצב כספי</h2></div><div class="panel-controls"><span id="dashboardHealthBadge" class="health-badge unknown">ממתין לנתונים</span><select id="dashboardAreaSelect" aria-label="בחירת מדינה"></select></div></div>
+            <p id="dashboardHealthHeadline" class="health-headline"></p>
+            <div id="dashboardFinance" class="metric-list"></div>
+            <button class="text-link" type="button" data-go="finance">לפירוט הכספי המלא ←</button>
+          </article>
+        </div>
+        <div class="dashboard-grid lower-grid">
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">TRAJECTORY</span><h2>מסלול ל־Q9</h2></div></div><div id="forecastSummary" class="forecast-grid"></div></article>
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">EVIDENCE</span><h2>מחקרים רלוונטיים</h2></div><button class="text-link" type="button" data-go="reports">לתובנות ולתוצאות המחקר</button></div><div id="dashboardResearch" class="compact-list"></div></article>
+        </div>
+        <div class="dashboard-grid lower-grid">
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">WHAT CHANGED</span><h2>מה השתנה מאז הרבעון הקודם?</h2></div><button class="text-link" type="button" data-go="reports">לכל המגמות</button></div><div id="dashboardChanges" class="compact-list"></div></article>
+          <article class="panel decision-tools"><div class="panel-head"><div><span class="panel-kicker">DECISION TOOLS</span><h2>בדקו לפני שמאשרים</h2></div></div><p>הסימולציה אינה משנה את נתוני האמת. אפשר להשוות חלופות או לבדוק מחיר לפני תיעוד החלטה.</p><div class="action-row"><button class="button secondary" type="button" data-go="simulation">השוואת חלופות</button><button class="button secondary" type="button" data-go="economics">בדיקת מחיר</button><button class="button ghost" type="button" data-go="agent">שאלו את ה-AI</button></div></article>
+        </div>
+      </section>
+
+      <section id="section-files" class="page">
+        <div class="page-head"><div><p class="eyebrow">AUTOMATED INTAKE</p><h1>העלאת נתונים</h1><p>העלו Q1, Q2 ו־Q3 בנפרד. המערכת תחלץ נתונים ותציג חריגים בלבד לאישור.</p></div></div>
+        <article class="panel">
+          <form id="uploadForm" class="upload-form">
+            <label class="drop-zone"><input id="uploadFile" name="file" type="file" required><strong>בחירת קובץ</strong><span id="fileChoice">Excel, CSV, PDF, תמונה או מסמך</span></label>
+            <label>רבעון<select name="quarter" required></select></label>
+            <label>סוג מסמך<select name="category" required></select></label>
+            <label class="grow">הערה<input name="notes" placeholder="מקור או הקשר"></label>
+            <button class="button" type="submit">העלאה ופענוח</button>
+          </form>
+        </article>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">REVIEW</span><h2>תהליכי קליטה</h2></div><span id="importCount" class="soft-pill"></span></div><div id="importsList" class="import-list"></div></article>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SOURCE FILES</span><h2>קבצים שמורים</h2></div><span id="uploadCount"></span></div><div id="uploadsList" class="file-list"></div></article>
+      </section>
+
+      <section id="section-finance" class="page">
+        <div class="page-head"><div><p class="eyebrow">FINANCIAL POSITION</p><h1>מצב כספי</h1><p>חברה מאוחדת ולפי כל מדינה, כולל מזומן פנוי, התחייבויות והון חוזר.</p></div><select id="financeAreaSelect" aria-label="בחירת תצוגה כספית"></select></div>
+        <article class="panel filter-bar">
+          <div><strong>טווח ניתוח</strong><small>בחרו רבעון בודד או תוצאה מצטברת</small></div>
+          <label>תצוגה<select id="financeModeSelect"><option value="quarter">רבעון נבחר</option><option value="cumulative">מצטבר</option></select></label>
+          <label>מרבעון<select id="financeFromSelect"></select></label>
+          <label>עד רבעון<select id="financeToSelect"></select></label>
+          <button id="applyFinanceFilter" class="button secondary" type="button">עדכון תצוגה</button>
+        </article>
+        <div id="financeRangeSummary" class="range-summary"></div>
+        <article class="panel financial-health-panel">
+          <div class="panel-head"><div><span class="panel-kicker">DIAGNOSIS</span><h2>אבחון בריאות פיננסית</h2></div><span id="financeHealthBadge" class="health-badge unknown">ממתין לנתונים</span></div>
+          <p id="financeHealthHeadline" class="health-headline"></p>
+          <div id="financeHealthChecks" class="health-check-grid"></div>
+        </article>
+        <div id="financeKpis" class="kpi-grid"></div>
+        <div class="finance-statements">
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">P&amp;L</span><h2>רווח והפסד</h2></div></div><div id="pnlSummary" class="metric-list"></div></article>
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">BALANCE SHEET</span><h2>מאזן ומינוף</h2></div></div><div id="balanceSummary" class="metric-list"></div></article>
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">LIQUIDITY</span><h2>נזילות ותזרים</h2></div></div><div id="liquiditySummary" class="metric-list"></div></article>
+        </div>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">COUNTRY VIEW</span><h2>השוואה בין מדינות</h2></div></div><div class="table-wrap"><table><thead><tr><th>מדינה</th><th>מצב</th><th>מטבע</th><th>הכנסות SF</th><th>רווח נקי SF</th><th>מזומן SF</th><th>חוב SF</th><th>מלאי SF</th><th>תקציב פנוי SF</th></tr></thead><tbody id="areaFinanceBody"></tbody></table></div></article>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">QUARTERLY PATH</span><h2>מסלול פיננסי לפי רבעון</h2></div></div><div class="table-wrap"><table><thead><tr><th>רבעון</th><th>הכנסות</th><th>רווח גולמי</th><th>רווח נקי</th><th>מזומן</th><th>חוב</th><th>ROS</th></tr></thead><tbody id="financeTrendBody"></tbody></table></div></article>
+        <details class="panel correction-panel"><summary>תיקון ידני חריג</summary><p>מיועד רק לשדה שלא חולץ נכון מהקובץ.</p><form id="areaFinanceForm" class="form-grid"><label>מדינה<input name="area" required></label><label>מטבע<input name="currency"></label><label>שער ל־SF<input name="fx_to_sf" type="number" step="any" value="1"></label><label>הכנסות במטבע מקומי<input name="revenue_lc" type="number" step="any"></label><label>רווח נקי במטבע מקומי<input name="net_profit_lc" type="number" step="any"></label><label>מזומן במטבע מקומי<input name="ending_cash_lc" type="number" step="any"></label><label>חוב במטבע מקומי<input name="debt_lc" type="number" step="any"></label><label>התחייבויות השקעה<input name="capex_commitments_lc" type="number" step="any"></label><div class="wide form-action"><button class="button" type="submit">שמירת תיקון</button></div></form></details>
+      </section>
+
+      <section id="section-reports" class="page">
+        <div class="page-head"><div><p class="eyebrow">CUMULATIVE INTELLIGENCE</p><h1>תובנות ומגמות</h1><p>מה השתנה בין הרבעונים, מה למדנו על תמחור ומתחרים, ומה תוצאות מחקרי השוק אומרות עבורנו.</p></div><div class="segmented"><button id="quarterReportButton" type="button">הרבעון הנבחר</button><button id="cumulativeReportButton" class="active" type="button">מצטבר עד הרבעון</button></div></div>
+        <div id="insightCards" class="insight-card-grid"></div>
+        <article class="panel"><div id="reportHeader" class="report-title"></div><div id="reportKpis" class="kpi-grid compact"></div><div id="reportNarrative" class="report-grid"></div></article>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">TREND</span><h2>מגמה רבעונית</h2></div></div><div class="table-wrap"><table><thead><tr><th>רבעון</th><th>הכנסות</th><th>רווח נקי</th><th>מזומן</th><th>מכירות</th><th>מלאי</th><th>טכנולוגיה</th></tr></thead><tbody id="trendBody"></tbody></table></div></article>
+        <div class="two-columns insight-columns">
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">PRICING SIGNALS</span><h2>כדאיות תמחור</h2></div></div><div id="pricingInsights" class="compact-list"></div></article>
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">COMPETITIVE MOVES</span><h2>מגמות מתחרים</h2></div></div><div id="competitorInsights" class="compact-list"></div></article>
+        </div>
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">MARKET RESEARCH</span><h2>תוצאות מחקרי שוק והמלצות</h2><p>המספרים מוצגים מתוך דוחות המחקר המאושרים, לצד המשמעות עבור החברה.</p></div><select id="insightResearchDomainSelect"><option value="">כל התחומים</option><option>תמחור</option><option>טכנולוגיה</option><option>קיבולת</option><option>תחרות</option><option>פיננסים</option></select></div>
+          <div id="insightResearchResults" class="research-insight-list"></div>
+        </article>
+      </section>
+
+      <section id="section-research" class="page">
+        <div class="page-head"><div><p class="eyebrow">MARKET INTELLIGENCE</p><h1>מרכז מחקרי שוק</h1><p>מה כל מחקר אומר, לאיזו החלטה הוא רלוונטי ומה עדיין חסר.</p></div><select id="researchDomainSelect"><option value="">כל ההחלטות</option><option>תמחור</option><option>ייצור</option><option>מו״פ</option><option>שיווק</option><option>קיבולת</option></select></div>
+        <div id="researchResults" class="research-grid"></div>
+        <details class="panel"><summary>קטלוג מחקרים זמין</summary><div id="researchCatalog" class="catalog-list"></div></details>
+      </section>
+
+      <section id="section-simulation" class="page">
+        <div class="page-head"><div><p class="eyebrow">SCENARIO LAB</p><h1>מעבדת תרחישים</h1><p>בנו סל פעולות, בדקו תקציב והשוו תוצאות צפויות עד Q9 בלי לשנות נתוני אמת.</p></div></div>
+        <div class="simulation-layout">
+          <article class="panel">
+            <div class="panel-head"><div><span class="panel-kicker">ACTIONS</span><h2>בניית סל פעולות</h2></div><span id="scenarioBudgetLabel" class="soft-pill">תקציב —</span></div>
+            <form id="actionForm" class="form-grid">
+              <label class="wide">פעולה במשחק<select name="code"></select></label>
+              <p id="actionTiming" class="wide action-timing"></p>
+              <label data-action-field="area">מדינה / אזור<select name="area"></select></label>
+              <label data-action-field="target_area">אזור יעד<select name="target_area"></select></label>
+              <label data-action-field="product">מוצר<select name="product"></select></label>
+              <label data-action-field="model">פלח / דגם<select name="model"></select></label>
+              <label data-action-field="grade">רמה טכנולוגית<input name="grade" type="number" min="0" max="9" step="1"></label>
+              <label data-action-field="x_grade">רמת X לייצור Y<input name="x_grade" type="number" min="0" max="9" step="1"></label>
+              <label data-action-field="price_lc">מחיר במטבע מקומי<input name="price_lc" type="number" step="any"></label>
+              <label data-action-field="advertising_lc">פרסום במטבע מקומי<input name="advertising_lc" type="number" step="any"></label>
+              <label data-action-field="units">יחידות<input name="units" type="number" step="1"></label>
+              <label data-action-field="plant_count">מספר מפעלים<input name="plant_count" type="number" min="0" max="3" step="1"></label>
+              <label data-action-field="office_delta">שינוי במספר משרדי מכירות<input name="office_delta" type="number" step="1"></label>
+              <label data-action-field="variable_cost_sf">עלות משתנה ליחידה SF<input name="variable_cost_sf" type="number" step="any"></label>
+              <label data-action-field="price_sf">מחיר ליחידה SF<input name="price_sf" type="number" step="any"></label>
+              <label data-action-field="amount_sf">סכום SF<input name="amount_sf" type="number" step="any"></label>
+              <label data-action-field="interest_rate">ריבית לרבעון %<input name="interest_rate" type="number" step="0.01"></label>
+              <label data-action-field="direction">כיוון הפעולה<select name="direction"><option value="borrow">קבלת הלוואה / רכישה</option><option value="invest">השקעה / מכירה</option></select></label>
+              <label data-action-field="currency">מטבע מקור<input name="currency"></label>
+              <label data-action-field="target_currency">מטבע יעד<input name="target_currency"></label>
+              <label data-action-field="transport_mode">אופן העברה<select name="transport_mode"><option value="surface">רגילה / ימית</option><option value="air">אווירית</option></select></label>
+              <label data-action-field="priority">עדיפות<input name="priority" type="number" step="1"></label>
+              <label data-action-field="study_id">מספר מחקר MR<input name="study_id" type="number" step="1"></label>
+              <label data-action-field="partner_company">חברה שותפה<input name="partner_company" type="number" min="1" max="10" step="1"></label>
+              <label data-action-field="final_payment_sf">תשלום סופי SF<input name="final_payment_sf" type="number" step="any"></label>
+              <label data-action-field="payment_quarter">רבעון תשלום<select name="payment_quarter"></select></label>
+              <label data-action-field="restricted">רישיון מוגבל<select name="restricted"><option value="false">לא</option><option value="true">כן</option></select></label>
+              <label data-action-field="cost_sf">עלות מזומן כוללת SF<input name="cost_sf" type="number" step="any" value="0"></label>
+              <div class="wide form-action"><button class="button secondary" type="submit">הוספה לסל</button></div>
+            </form>
+            <div id="actionBasket" class="action-basket"></div>
+            <div class="action-row"><button id="runSimulationButton" class="button" type="button">הרצת סימולציה</button><button id="saveScenarioButton" class="button secondary" type="button">שמירת תרחיש</button><button id="createDecisionPackButton" class="button ghost" type="button">יצירת חבילת החלטות</button></div>
+          </article>
+          <article class="panel result-panel"><div class="panel-head"><div><span class="panel-kicker">EXPECTED OUTCOME</span><h2>תוצאות צפויות</h2></div></div><div id="simulationResult" class="empty-copy">הוסיפו פעולה והריצו סימולציה.</div></article>
+        </div>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SAVED</span><h2>תרחישים שמורים</h2></div></div><div id="savedScenarios" class="compact-list"></div></article>
+      </section>
+
+      <section id="section-economics" class="page">
+        <div class="page-head"><div><p class="eyebrow">PRICING ENGINE</p><h1>תמחור וכלכלת יחידה</h1><p>מחיר מינימום, איזון, מחיר יעד ומחיר מומלץ תחת מגבלת מלאי וביקוש.</p></div></div>
+        <div class="two-columns">
+          <article class="panel"><form id="economicsForm" class="form-grid"><label>מחיר נוכחי<input name="price_lc" type="number" step="any"></label><label>ביקוש במחיר בסיס<input name="base_demand_units" type="number" step="any"></label><label>עלות ייצור ליחידה<input name="manufacturing_cost_lc" type="number" step="any"></label><label>עלות מכירה משתנה<input name="variable_selling_cost_lc" type="number" step="any"></label><label>עלויות קבועות<input name="fixed_cost_lc" type="number" step="any"></label><label>כמות זמינה<input name="available_units" type="number" step="any"></label><label>אלסטיות מחיר<input name="elasticity" type="number" step="0.1" value="1"></label><label>מרווח תפעולי יעד<input name="target_operating_margin" type="number" step="0.01" value="0.2"></label><div class="wide form-action"><button class="button" type="submit">חישוב מחיר</button></div></form></article>
+          <article class="panel"><div id="economicsResult" class="empty-copy">הזינו נתונים או בחרו המלצת תמחור מחדר ההחלטות.</div></article>
+        </div>
+      </section>
+
+      <section id="section-agent" class="page">
+        <div class="page-head"><div><p class="eyebrow">AI COPILOT</p><h1>צ׳אט AI</h1><p>שיחה חופשית על כלל הנתונים, המסמכים והתרחישים. אפשר להעלות קובץ ישירות כאן ולשאול עליו לאחר אישור הקליטה.</p></div><span id="agentStatus" class="status-chip">בודק הגדרה…</span></div>
+        <article class="panel chat-upload-panel">
+          <div><span class="panel-kicker">UPLOAD &amp; ASK</span><h2>העלאת קובץ לצ׳אט</h2><p>הרבעון יזוהה אוטומטית. המערכת תציג מה חולץ לפני שהנתונים נכנסים למודל.</p></div>
+          <form id="agentUploadForm" class="chat-upload-form">
+            <input id="agentUploadFile" name="file" type="file" required>
+            <input name="quarter" type="hidden" value="Setup">
+            <label>סוג מסמך<select name="category"></select></label>
+            <button class="button secondary" type="submit">העלאה ופענוח</button>
+          </form>
+          <div id="agentImportStatus" class="agent-import-status"></div>
+        </article>
+        <article class="agent-shell">
+          <div class="agent-control">
+            <label>הנחיות קבועות ל־AI
+              <textarea id="agentInstructions" rows="2" placeholder="לדוגמה: שמור תמיד 500K SF במזומן; תעדף רווחיות על נתח שוק; הצג חלופה שמרנית."></textarea>
+            </label>
+            <div class="quick-prompts" aria-label="שאלות מהירות">
+              <button type="button" data-agent-prompt="נתח את המצב הפיננסי הנוכחי: נזילות, רווח והפסד, מאזן, תזרים, חוב והון חוזר. מה תקין ומה דורש פעולה?">אבחון פיננסי</button>
+              <button type="button" data-agent-prompt="תן לי שלוש החלטות מומלצות לרבעון הפעיל, כולל השפעה על רווח, מזומן וציון Q9, במסגרת התקציב.">3 החלטות עכשיו</button>
+              <button type="button" data-agent-prompt="בנה סל פעולות אופטימלי תחת התקציב ורצפת המזומן, והצג סדר ביצוע.">אופטימיזציית תקציב</button>
+              <button type="button" data-agent-prompt="השווה תרחיש שמרני, מומלץ ואגרסיבי עד Q9 והסבר את הסיכונים.">השוואת תרחישים</button>
+              <button type="button" data-agent-prompt="אילו נתונים או מחקרי שוק חסרים כדי לשפר את ההחלטה הבאה?">מה חסר?</button>
+            </div>
+          </div>
+          <div id="agentMessages" class="agent-messages"><div class="agent-bubble assistant">אני יכול לאבחן את המצב הפיננסי, להשוות החלטות, להריץ סימולציות ולהציע סדר פעולות עד Q9. בחרו שאלה מהירה או כתבו הוראה חופשית.</div></div>
+          <form id="agentForm" class="agent-form"><textarea name="question" rows="2" placeholder="כתבו הוראה חופשית — למשל: השווה העלאת מחיר מול צמצום ייצור ושמור על רצפת המזומן" required></textarea><button class="button" type="submit">ניתוח עם AI</button></form>
+        </article>
+      </section>
+
+      <section id="section-decisionlog" class="page">
+        <div class="page-head"><div><p class="eyebrow">DECISION MEMORY</p><h1>לוג החלטות</h1><p>מה המליצה המערכת, מה החלטנו, מה ציפינו שיקרה ומה התרחש בפועל.</p></div><div class="log-filters"><select id="decisionLogQuarter"><option value="">כל הרבעונים</option></select><select id="decisionLogStatus"><option value="">כל הסטטוסים</option><option>טיוטה</option><option>אושר</option><option>בוצע</option><option>נסגר</option></select></div></div>
+        <div id="decisionLogSummary" class="q9-strip log-summary"></div>
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">TIMELINE</span><h2>החלטות עד כה</h2></div><button id="newDecisionButton" class="button secondary" type="button">הוספת החלטה ידנית</button></div>
+          <div id="decisionLogList" class="decision-log-list"></div>
+        </article>
+        <details id="manualDecisionPanel" class="panel">
+          <summary>הוספת החלטה שלא נוצרה מחדר ההחלטות</summary>
+          <form id="decisionForm" class="form-grid">
+            <label>רבעון<select name="quarter"></select></label>
+            <label>תחום<input name="domain" placeholder="תמחור, ייצור, מימון…"></label>
+            <label class="wide">כותרת<input name="title" required></label>
+            <label class="wide">מה הוחלט?<textarea name="selected_option" rows="2"></textarea></label>
+            <label class="wide">מדוע?<textarea name="rationale" rows="2"></textarea></label>
+            <label>בעל אחריות<input name="owner"></label>
+            <label>סטטוס<select name="status"><option>טיוטה</option><option>אושר</option><option>בוצע</option><option>נסגר</option></select></label>
+            <label class="wide">תוצאה צפויה<textarea name="expected_result" rows="2"></textarea></label>
+            <div class="wide form-action"><button class="button" type="submit">שמירת החלטה</button></div>
+          </form>
+        </details>
+      </section>
+
+      <section id="section-settings" class="page">
+        <div class="page-head"><div><p class="eyebrow">CONTROL</p><h1>הגדרות</h1><p>קווים אדומים ומסגרת הניקוד הפנימית.</p></div></div>
+        <article class="panel narrow"><form id="settingsForm" class="form-grid"><label class="wide">שם החברה<input name="company_name"></label><label>רצפת מזומן SF<input name="cash_buffer_sf" type="number" step="any" min="0"></label><label>השקעת מו״פ מינימלית SF<input name="min_rd_sf" type="number" step="any" min="0"></label><label>רבעון פתיחה<select name="startup_quarter"></select></label></form><p class="hint">המערכת נועלת 50% ביצועי עבר ו־50% פוטנציאל עתידי. המשקלים הפנימיים מוצגים כאומדן ניהולי בלבד.</p></article>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">ADVANCED</span><h2>כלים ותפעול</h2><p>מסכים משניים שאינם נדרשים בכל ישיבת החלטות.</p></div></div><div class="settings-tools"><button class="tool-tile" type="button" data-go="files"><strong>מרכז קבצים</strong><span>בדיקת חילוץ, אישור ומקורות</span></button><button class="tool-tile" type="button" data-go="simulation"><strong>מעבדת תרחישים</strong><span>בניית סל פעולות מלא</span></button><button class="tool-tile" type="button" data-go="economics"><strong>תמחור וכלכלת יחידה</strong><span>מחיר מינימום, איזון ויעד</span></button><button class="tool-tile" type="button" data-go="rules"><strong>מרכז החוקים</strong><span>מקורות, גרסאות ובדיקת פעולה</span></button><button class="tool-tile" type="button" data-go="guide"><strong>מדריך שימוש</strong><span>תהליך עבודה רבעוני</span></button><button class="tool-tile" type="button" data-go="backup"><strong>גיבוי ושחזור</strong><span>הורדת מצב מלא ושחזור</span></button></div></article>
+      </section>
+
+      <section id="section-rules" class="page">
+        <div class="page-head"><div><p class="eyebrow">APPROVED RULEBOOK</p><h1>מרכז החוקים</h1><p>מקור האמת המאושר למשחק הנוכחי. כל חוק מוצג עם מקור, עמוד, גרסה וסוג אכיפה.</p></div><span id="rulebookVersion" class="status-chip">טוען גרסה…</span></div>
+        <div id="rulebookSummary" class="q9-strip"></div>
+        <article class="panel">
+          <div class="panel-head"><div><span class="panel-kicker">SEARCH</span><h2>חיפוש חוק בשפה רגילה</h2></div></div>
+          <form id="ruleSearchForm" class="filter-bar">
+            <label class="grow">חיפוש<input name="query" placeholder="לדוגמה: מתי מפעל חדש יכול לייצר?"></label>
+            <label>תחום<select name="domain"><option value="">כל התחומים</option><option value="finance">מימון</option><option value="production">ייצור</option><option value="pricing">תמחור</option><option value="logistics">לוגיסטיקה</option><option value="technology">טכנולוגיה</option><option value="research">מחקר</option></select></label>
+            <label>סוג<select name="knowledge_type"><option value="">כל הסוגים</option><option>Hard Rule</option><option>Parameter</option><option>Time Lag</option><option>Formula</option><option>Decision Constraint</option><option>Market Research Definition</option><option>Strategy Constraint</option></select></label>
+            <button class="button secondary" type="submit">חיפוש</button>
+          </form>
+          <div id="rulebookList" class="rulebook-list"></div>
+        </article>
+        <div class="two-columns">
+          <article class="panel">
+            <div class="panel-head"><div><span class="panel-kicker">LEGALITY CHECK</span><h2>האם פעולה זו מותרת?</h2></div></div>
+            <form id="ruleCheckForm" class="form-grid">
+              <label>קוד טופס<input name="code" placeholder="A2-4, H5…"></label>
+              <label>סוג פעולה<input name="type" placeholder="production, rd…"></label>
+              <label>אזור<select name="area"><option value="">—</option><option>USA</option><option>Europe</option><option>Brazil</option><option>Liechtenstein</option></select></label>
+              <label>מוצר<select name="product"><option value="">—</option><option>X</option><option>Y</option></select></label>
+              <label>רמת מוצר<input name="grade" type="number" step="1"></label>
+              <label>רמת X לייצור Y<input name="x_grade" type="number" step="1"></label>
+              <label>כמות<input name="units" type="number" step="any"></label>
+              <label>עלות SF<input name="cost_sf" type="number" step="any"></label>
+              <div class="wide form-action"><button class="button" type="submit">בדיקת פעולה</button></div>
+            </form>
+            <div id="ruleCheckResult" class="empty-copy">הזינו פעולה כדי לבדוק אותה מול החוקים המאושרים.</div>
+          </article>
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">SOURCES & CONFLICTS</span><h2>מקורות וסתירות פתוחות</h2></div></div><div id="ruleSources" class="compact-list"></div></article>
+        </div>
+      </section>
+
+      <section id="section-guide" class="page">
+        <div class="page-head"><div><p class="eyebrow">HOW TO USE</p><h1>מדריך שימוש</h1><p>מסלול העבודה הקבוע מסיום Q3 ועד Q9.</p></div></div>
+        <div class="guide-steps">
+          <article class="guide-step"><span>1</span><div><h2>הקמה</h2><p>הגדירו חברה, רצפת מזומן ויעדי Q9; העלו אסטרטגיה וכללי משחק.</p></div></article>
+          <article class="guide-step"><span>2</span><div><h2>קליטת Q1–Q3</h2><p>העלו כל רבעון בנפרד, בדקו חריגים ואשרו את הנתונים שחולצו.</p></div></article>
+          <article class="guide-step"><span>3</span><div><h2>חדר החלטות</h2><p>עברו על כספים, תחזית Q9 ושלוש עד חמש ההחלטות הדחופות.</p></div></article>
+          <article class="guide-step"><span>4</span><div><h2>מחקר וסימולציה</h2><p>בדקו רק מחקרים רלוונטיים וסמלצו חלופות במסגרת התקציב.</p></div></article>
+          <article class="guide-step"><span>5</span><div><h2>אישור וגיבוי</h2><p>שמרו תרחיש, תעדו החלטה, צרו Snapshot והורידו גיבוי.</p></div></article>
+          <article class="guide-step"><span>6</span><div><h2>הרבעון הבא</h2><p>העלו את התוצאות, השוו תחזית לביצוע ועדכנו את המודל עד Q9.</p></div></article>
+        </div>
+      </section>
+
+      <section id="section-backup" class="page">
+        <div class="page-head"><div><p class="eyebrow">CONTINUITY</p><h1>גיבוי ושחזור</h1><p>כל הרשומות, מחקרי השוק, התרחישים, שיחות ה-Agent והקבצים.</p></div></div>
+        <div class="two-columns"><article class="panel"><h2>הורדת גיבוי מלא</h2><p>מומלץ לאחר קליטת Q1–Q3 ולפני סגירת כל רבעון.</p><a class="button" href="/api/backup">הורדת ZIP</a></article><article class="panel"><h2>שחזור מגיבוי</h2><form id="restoreForm" class="restore-form"><input name="file" type="file" accept=".zip" required><select name="mode"><option value="replace">החלפה מלאה</option><option value="merge">מיזוג</option></select><button class="button danger" type="submit">שחזור</button></form></article></div>
+        <article class="panel danger-zone"><div><h2>איפוס נתוני חברה</h2><p>מוחק רשומות וקבצים אך משאיר קטלוגי מבנה.</p></div><button id="resetButton" class="button danger secondary" type="button">איפוס</button></article>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/static/app.js?v=1.0.1" defer></script>
+</body>
+</html>

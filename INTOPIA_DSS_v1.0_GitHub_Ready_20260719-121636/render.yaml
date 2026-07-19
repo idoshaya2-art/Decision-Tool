@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: intopia-dss
+    runtime: python
+    plan: free
+    branch: main
+    autoDeploy: true
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: INTOPIA_BACKEND
+        value: supabase
+      - key: APP_ENV
+        value: production
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: intopia-files
+      - key: APP_REQUIRE_AUTH
+        value: "true"
+      - key: APP_ACCESS_USER
+        value: intopia
+      - key: APP_ACCESS_PASSWORD
+        sync: false
+      - key: MAX_UPLOAD_MB
+        value: "10"
+      - key: MAX_RESTORE_MB
+        value: "100"
+      - key: OPENAI_AGENT_ENABLED
+        value: "true"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.6-sol
+      - key: OPENAI_MAX_OUTPUT_TOKENS
+        value: "2400"
