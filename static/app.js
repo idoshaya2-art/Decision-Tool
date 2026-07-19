@@ -484,12 +484,22 @@ function renderFinanceRangeExtras(selected) {
   const mode = $("#financeModeSelect").value || "quarter";
   const from = $("#financeFromSelect").value || state.quarter;
   const to = $("#financeToSelect").value || state.quarter;
+  const coverage = state.financeRange?.intelligence?.financial?.actual_coverage
+    || state.intelligence?.financial?.actual_coverage
+    || {};
+  const actualTo = coverage.data_as_of
+    && quarterNumber(coverage.data_as_of) < quarterNumber(to)
+    ? coverage.data_as_of
+    : to;
+  const displayedRange = mode === "cumulative"
+    ? `${from}–${actualTo}`
+    : `Actual ${actualTo}`;
   const rangeRow = financeRangeView(selected) || {};
   $("#financeRangeSummary").innerHTML = [
-    kpi("טווח מוצג", mode === "cumulative" ? `${from}–${to}` : to, selected),
+    kpi("טווח מוצג", displayedRange, selected),
     kpi("הכנסות בטווח", sf(rangeRow.revenue_sf), mode === "cumulative" ? "סכום הרבעונים" : "הרבעון הנבחר"),
     kpi("רווח נקי בטווח", sf(rangeRow.net_profit_sf), mode === "cumulative" ? "סכום הרבעונים" : "הרבעון הנבחר"),
-    kpi("מזומן בסוף הטווח", sf(rangeRow.ending_cash_sf), to),
+    kpi("מזומן בסוף הטווח", sf(rangeRow.ending_cash_sf), actualTo),
   ].join("");
   $("#financeTrendBody").innerHTML = rows.length ? rows.map(row => {
     const margin = num(row.revenue_sf) ? num(row.net_profit_sf) / num(row.revenue_sf) : null;
