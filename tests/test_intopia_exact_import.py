@@ -76,6 +76,7 @@ def test_exact_intopia_parser_detects_quarter_and_paid_research():
     assert extracted["metadata"]["company_number"] == 8
     assert extracted["finance"]["revenue_sf"] == 600_000
     assert extracted["finance"]["debt_sf"] == 1_500_000
+    assert '"total_assets_sf":4000000.0' in extracted["finance"]["notes"]
     assert len(extracted["finance_by_area"]) == 4
     debts = {row["area"]: row["debt_lc"] for row in extracted["finance_by_area"]}
     assert debts == {"USA": 200_000, "Europe": 300_000, "Brazil": 400_000, "Liechtenstein": 600_000}

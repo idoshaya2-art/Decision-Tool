@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 from pathlib import Path
 from typing import Any, Iterable
@@ -270,6 +271,14 @@ def _intopia_finance(tables: dict[str, list[list[Any]]]) -> dict[str, Any]:
         _sum_cells(balance, (29,), (3, 5, 7))
         + _sum_cells(balance, (33, 34), (8,))
     )
+    balance_snapshot = {
+        "inventory_value_sf": round(_number(_cell(balance, 13, 9)) or 0, 2),
+        "current_assets_sf": round(_number(_cell(balance, 16, 9)) or 0, 2),
+        "current_liabilities_sf": round(_number(_cell(balance, 30, 9)) or 0, 2),
+        "total_assets_sf": round(_number(_cell(balance, 22, 9)) or 0, 2),
+        "total_liabilities_sf": round(_number(_cell(balance, 36, 9)) or 0, 2),
+        "equity_sf": round(_number(_cell(balance, 47, 9)) or 0, 2),
+    }
     return {
         "revenue_sf": round(_sum_cells(income, sales_rows, (9,)), 2),
         "gross_profit_sf": round(_number(_cell(income, 21, 9)) or 0, 2),
@@ -284,7 +293,10 @@ def _intopia_finance(tables: dict[str, list[list[Any]]]) -> dict[str, Any]:
         "rd_x_sf": round(_number(_cell(income, 46, 9)) or 0, 2),
         "rd_y_sf": round(_number(_cell(income, 47, 9)) or 0, 2),
         "dividends_sf": round(_number(_cell(income, 58, 9)) or 0, 2),
-        "notes": "חולץ אוטומטית מדוח INTOPIA הרשמי; סכומים מאוחדים ב-SF.",
+        "notes": (
+            "חולץ אוטומטית מדוח INTOPIA הרשמי; סכומים מאוחדים ב-SF. "
+            f"[[BALANCE:{json.dumps(balance_snapshot, separators=(',', ':'))}]]"
+        ),
     }
 
 

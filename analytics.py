@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
 from statistics import mean
 from typing import Any, Iterable
@@ -95,6 +97,17 @@ def weighted_available(values: dict[str, float | None], weights: dict[str, float
 
 def _ratio(value: float, denominator: float) -> float | None:
     return value / denominator if denominator else None
+
+
+def _embedded_balance(row: dict[str, Any]) -> dict[str, float]:
+    match = re.search(r"\[\[BALANCE:(\{.*?\})\]\]", str(row.get("notes") or ""))
+    if not match:
+        return {}
+    try:
+        payload = json.loads(match.group(1))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return {str(key): num(value) for key, value in payload.items()}
 
 
 def _financial_health(
@@ -288,6 +301,12 @@ def financial_position(
     current_liabilities = sum(area_sf(row, "current_liabilities_lc") for row in current_areas)
     equity = sum(area_sf(row, "equity_lc") for row in current_areas)
     total_investment = sum(area_sf(row, "total_investment_lc") for row in current_areas)
+    official_balance = _embedded_balance(latest)
+    inventory = official_balance.get("inventory_value_sf", inventory)
+    current_assets = official_balance.get("current_assets_sf", current_assets)
+    current_liabilities = official_balance.get("current_liabilities_sf", current_liabilities)
+    equity = official_balance.get("equity_sf", equity)
+    total_investment = official_balance.get("total_assets_sf", total_investment)
     operating_cash_flow_values = [area_sf(row, "operating_cash_flow_lc") for row in current_areas]
     operating_cash_flow_available = any(abs(value) > 0.000001 for value in operating_cash_flow_values)
     operating_cash_flow = sum(operating_cash_flow_values) if operating_cash_flow_available else None

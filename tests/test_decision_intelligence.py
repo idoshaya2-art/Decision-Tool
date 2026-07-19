@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import zipfile
 
+from analytics import financial_position
+
 
 def _seed_q1_to_q3(client):
     for index, revenue, profit, cash in (
@@ -90,6 +92,51 @@ def test_q4_finance_warns_when_only_q1_actual_is_available(client):
     assert coverage["missing_quarters"] == ["Q2", "Q3"]
     assert "Q1" in coverage["message"]
     assert "Q4" in coverage["message"]
+
+
+def test_consolidated_balance_uses_official_total_instead_of_summing_internal_controls():
+    result = financial_position(
+        "Q4",
+        [
+            {
+                "quarter": "Q3",
+                "ending_cash_sf": 1_067_452,
+                "debt_sf": 643_433,
+                "notes": (
+                    'Official. [[BALANCE:{"inventory_value_sf":2251199,'
+                    '"current_assets_sf":3318651,"current_liabilities_sf":2144512,'
+                    '"total_assets_sf":8358651,"total_liabilities_sf":2787945,'
+                    '"equity_sf":5570707}]]'
+                ),
+            }
+        ],
+        [
+            {
+                "quarter": "Q3",
+                "area": "Europe",
+                "fx_to_sf": 1.5,
+                "equity_lc": 3_717_001,
+                "current_assets_lc": 1_500_800,
+                "current_liabilities_lc": 1_143_798,
+                "inventory_value_lc": 1_500_800,
+                "total_investment_lc": 4_860_800,
+            },
+            {
+                "quarter": "Q3",
+                "area": "Liechtenstein",
+                "fx_to_sf": 1,
+                "equity_lc": 6_162_397,
+                "current_assets_lc": 20_000,
+                "current_liabilities_lc": 424_170,
+                "total_investment_lc": 7_230_000,
+            },
+        ],
+        0,
+    )
+    consolidated = result["consolidated"]
+    assert consolidated["equity_sf"] == 5_570_707
+    assert consolidated["total_investment_sf"] == 8_358_651
+    assert consolidated["current_assets_sf"] == 3_318_651
 
 
 def test_file_import_review_commit_and_persistence(client):
