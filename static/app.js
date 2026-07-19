@@ -10,6 +10,8 @@ const state = {
   lastSimulation: null,
   agentThreadId: null,
   rulebook: null,
+  viewMode: "quarter",
+  approvedQuarters: [],
   suppressAutosave: false,
   timers: new Map(),
 };
@@ -77,6 +79,32 @@ function fillSelect(select, values, selected, includeBlank = false) {
   const options = includeBlank ? ["", ...values] : values;
   select.innerHTML = options.map(value => `<option value="${esc(value)}">${esc(value || "הכול")}</option>`).join("");
   if (selected != null) select.value = selected;
+}
+
+function latestApprovedQuarter() {
+  return [...(state.approvedQuarters || [])]
+    .sort((a, b) => quarterNumber(a) - quarterNumber(b))
+    .at(-1) || null;
+}
+
+function nextPlanningQuarter(actualQuarter) {
+  if (!actualQuarter) return state.quarter;
+  return `Q${Math.min(9, quarterNumber(actualQuarter) + 1)}`;
+}
+
+function renderQuarterPicker() {
+  const select = $("#quarterSelect");
+  if (!select || !state.meta) return;
+  const approved = new Set(state.approvedQuarters || []);
+  const options = [
+    '<option value="__all__">מצטבר (הכול)</option>',
+    ...state.meta.quarters.map(quarter => {
+      const label = `${approved.has(quarter) ? "✓ " : ""}${quarter}`;
+      return `<option value="${esc(quarter)}">${esc(label)}</option>`;
+    }),
+  ];
+  select.innerHTML = options.join("");
+  select.value = state.viewMode === "cumulative" ? "__all__" : state.quarter;
 }
 
 function selectedActionDefinition() {
@@ -519,6 +547,12 @@ async function loadFinanceRange() {
 
 async function loadUploads() {
   const [uploads, imports] = await Promise.all([api("/api/uploads"), api("/api/imports")]);
+  state.approvedQuarters = [...new Set(
+    imports
+      .filter(row => row.committed_at && /^Q[1-9]$/.test(String(row.quarter || "")))
+      .map(row => String(row.quarter))
+  )].sort((a, b) => quarterNumber(a) - quarterNumber(b));
+  renderQuarterPicker();
   $("#uploadCount").textContent = `${uploads.length} קבצים`;
   $("#importCount").textContent = `${imports.length} תהליכים`;
   $("#uploadsList").innerHTML = uploads.length ? uploads.map(row => `<div class="file-row"><strong>${esc(row.original_name)}</strong><span>${esc(row.quarter)}</span><span>${esc(row.category)}</span><span>${fmt(row.size_bytes / 1024, 1)} KB</span><div class="file-actions"><a href="/api/uploads/${encodeURIComponent(row.id)}/download">הורדה</a><button class="delete" data-delete-upload="${esc(row.id)}" type="button">מחיקה</button></div></div>`).join("") : '<div class="empty-copy">טרם הועלו קבצים.</div>';
@@ -878,9 +912,27 @@ function bindStrategyOptimization() {
 function bindSettingsAndQuarter() {
   $("#settingsForm").addEventListener("input", () => debounceSave("settings", () => api("/api/settings", {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(formPayload($("#settingsForm")))})));
   $("#quarterSelect").addEventListener("change", async event => {
-    state.quarter = event.target.value;
+    if (event.target.value === "__all__") {
+      state.viewMode = "cumulative";
+      state.reportMode = "cumulative";
+      state.quarter = nextPlanningQuarter(latestApprovedQuarter());
+      $("#financeModeSelect").value = "cumulative";
+      $("#financeFromSelect").disabled = false;
+      $("#financeFromSelect").value = "Q1";
+      $("#quarterReportButton").classList.remove("active");
+      $("#cumulativeReportButton").classList.add("active");
+    } else {
+      state.viewMode = "quarter";
+      state.quarter = event.target.value;
+      state.reportMode = "quarter";
+      $("#financeModeSelect").value = "quarter";
+      $("#financeFromSelect").disabled = true;
+      $("#quarterReportButton").classList.add("active");
+      $("#cumulativeReportButton").classList.remove("active");
+    }
     await api("/api/settings", {method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify({selected_quarter: state.quarter})});
     await loadCurrentQuarter();
+    renderQuarterPicker();
   });
 }
 
@@ -1182,7 +1234,7 @@ async function initialize() {
     await loadHealth();
     state.meta = await api("/api/meta");
     const settings = await loadSettings();
-    fillSelect($("#quarterSelect"), state.meta.quarters, state.quarter);
+    renderQuarterPicker();
     fillSelect($("#settingsForm [name=startup_quarter]"), state.meta.quarters, settings.startup_quarter || "Q4");
     fillSelect($("#uploadForm [name=quarter]"), ["Setup", ...state.meta.quarters], "Setup");
     $("#uploadForm [name=quarter] option[value=Setup]").textContent = "זיהוי רבעון אוטומטי";

@@ -13,7 +13,7 @@ import db
 
 BACKUP_FORMAT = "intopia-dss-cloud-backup"
 BACKUP_VERSION = 1
-APP_VERSION = "1.1.3-q3-actual-label"
+APP_VERSION = "1.1.4-cumulative-quarter-picker"
 
 
 class BackupError(ValueError):
