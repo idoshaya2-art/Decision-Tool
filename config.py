@@ -65,8 +65,8 @@ class AppConfig:
             max_restore_bytes=_as_positive_int(os.getenv("MAX_RESTORE_MB"), 100) * 1024 * 1024,
             openai_agent_enabled=_as_bool(os.getenv("OPENAI_AGENT_ENABLED"), False),
             openai_api_key=os.getenv("OPENAI_API_KEY", "").strip(),
-            openai_model=os.getenv("OPENAI_MODEL", "").strip(),
-            openai_max_output_tokens=_as_positive_int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS"), 1200),
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-sol").strip() or "gpt-5.6-sol",
+            openai_max_output_tokens=_as_positive_int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS"), 2400),
         )
 
     def validation_errors(self) -> list[str]:

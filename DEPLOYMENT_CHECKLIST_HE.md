@@ -15,6 +15,12 @@
 2. הריצו רק את `supabase/migration_v0.5.sql`.
 3. הסקריפט מוסיף טבלאות ושדות; הוא אינו מוחק נתוני חברה.
 
+### מערכת v0.5 קיימת — השדרוג הנוכחי
+
+1. הורידו גיבוי מלא מהאפליקציה.
+2. הריצו פעם אחת את `supabase/migration_v0.6.sql` ב־SQL Editor.
+3. הסקריפט מוסיף רק את `operations.fx_to_sf`; הוא אינו מוחק או מאפס נתונים.
+
 ### העתיקו שני פרטים
 
 ב־Supabase פתחו **Project Settings → API Keys** או **Connect**:
@@ -58,6 +64,8 @@ tests/
 | `SUPABASE_URL` | Project URL שהעתקתם |
 | `SUPABASE_SECRET_KEY` | Secret/service-role key של השרת |
 | `APP_ACCESS_PASSWORD` | סיסמת צוות חדשה וחזקה |
+| `OPENAI_API_KEY` | מפתח שרת של OpenAI API; לא מפתח Supabase ולא סיסמת ChatGPT |
+| `OPENAI_MODEL` | שם מודל Responses API הזמין בפרויקט OpenAI שלכם |
 
 5. אשרו Deploy.
 
@@ -81,8 +89,8 @@ APP_REQUIRE_AUTH=true
 APP_ACCESS_USER=intopia
 MAX_UPLOAD_MB=10
 MAX_RESTORE_MB=100
-OPENAI_AGENT_ENABLED=false
-OPENAI_MAX_OUTPUT_TOKENS=1200
+OPENAI_AGENT_ENABLED=true
+OPENAI_MAX_OUTPUT_TOKENS=2400
 ```
 
 ## ד. בדיקה
@@ -104,9 +112,9 @@ OPENAI_MAX_OUTPUT_TOKENS=1200
 5. ב־Render בצעו **Manual Deploy → Deploy latest commit**. ודאו שהנתון והקובץ נשארו.
 6. ודאו ב־Supabase שהרשומה קיימת ב־Table Editor והקובץ ב־Storage.
 
-## ה. הפעלת Decision Agent — אופציונלי
+## ה. בדיקת Decision Agent
 
-ב־Render → Environment הוסיפו:
+ב־Render → Environment ודאו שקיימים:
 
 ```text
 OPENAI_AGENT_ENABLED=true
@@ -116,10 +124,18 @@ OPENAI_MODEL=<מודל הזמין בפרויקט ה-API שלכם>
 
 לחצו **Save, rebuild, and deploy**. אל תדביקו את המפתח ב־GitHub או במסך האפליקציה. OpenAI API עשוי להיות בתשלום; כאשר ה־Agent כבוי, כל שאר המערכת ממשיכה לפעול.
 
+פתחו לאחר הפריסה:
+
+```text
+https://YOUR-SERVICE.onrender.com/api/agent/status
+```
+
+תוצאה תקינה כוללת `"ready": true`. אם מתקבל `false`, השדה `missing` מציין בדיוק איזה משתנה חסר. הערכים הסודיים עצמם לעולם אינם מוחזרים.
+
 ## ו. התחלת העבודה
 
 1. העלו אסטרטגיה ויעדי Q9 תחת `Setup`.
-2. העלו ואשרו בנפרד Q1, Q2 ו־Q3.
+2. בחרו זיהוי אוטומטי, העלו ואשרו בנפרד Q1, Q2 ו־Q3.
 3. בחרו Q4 בחלק העליון.
 4. בדקו מצב כספי, תחזית Q9 והמלצות.
 5. הריצו תרחישים לפני החלטות.

@@ -175,6 +175,13 @@ UUID_TABLES = {
     "scenario_portfolios",
     "agent_threads",
     "agent_messages",
+    "rule_conflicts",
+    "document_chunks",
+    "ai_runs",
+    "recommendation_evidence",
+    "forecasts",
+    "decision_packs",
+    "optimization_runs",
 }
 
 

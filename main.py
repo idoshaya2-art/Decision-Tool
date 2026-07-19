@@ -21,12 +21,28 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 import db
-from agent_service import agent_status, run_agent
-from analytics import build_scorecard, financial_position, q9_forecast, recommendations, simulate_portfolio
+from agent_service import agent_status, analyze_rule_candidates, run_agent
+from analytics import (
+    analyze_decision_dependencies,
+    build_scorecard,
+    financial_position,
+    q9_forecast,
+    recommendations,
+    simulate_portfolio,
+)
 from backup_service import APP_VERSION, BackupError, create_backup, restore_backup
 from config import get_config
 from import_service import extract_document
+from insights import build_cumulative_trends, enrich_research_results
+from intopia_rules import DECISION_ACTIONS
 from logic import build_summary, decision_gates, loan_plan, scenario_calculation, unit_economics_calculation
+from rulebook import (
+    RULEBOOK_VERSION,
+    evaluate_action as evaluate_rulebook_action,
+    rulebook_summary,
+    search_rules,
+    validate_report,
+)
 from seed_data import (
     AREAS,
     CHANNELS,
@@ -38,10 +54,92 @@ from seed_data import (
     STATUS_LEVELS,
     XY_CONVERSION,
 )
+from strategy_optimizer import build_strategy_optimization
 
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+
+
+def _chunks_from_extraction(extraction: dict[str, Any]) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    previews = (extraction.get("extracted_data") or {}).get("previews") or []
+    for index, preview in enumerate(previews, start=1):
+        if not isinstance(preview, dict):
+            continue
+        section = str(preview.get("sheet") or preview.get("section") or f"section-{index}")
+        content = str(preview.get("text") or "").strip()
+        if not content and preview.get("rows"):
+            content = json.dumps(preview.get("rows"), ensure_ascii=False, default=str)
+        if len(content) < 10:
+            continue
+        chunks.append(
+            {
+                "page": preview.get("page"),
+                "section": section,
+                "content": content[:12000],
+                "metadata": {
+                    "parser_type": extraction.get("parser_type"),
+                    "confidence": extraction.get("confidence"),
+                    "preview_index": index,
+                },
+            }
+        )
+    return chunks
+
+
+def _analyze_uploaded_rule_source(upload: dict[str, Any], *, force: bool = False) -> dict[str, Any]:
+    upload_id = str(upload.get("id") or "")
+    source_id = f"upload:{upload_id}"
+    chunks = db.list_document_chunks(upload_id=upload_id, limit=100)
+    if not chunks:
+        return {"status": "no_readable_text", "candidates": [], "conflicts": []}
+    existing = [
+        row
+        for row in db.list_rule_conflicts()
+        if str(row.get("candidate_source_id") or "") == source_id
+    ]
+    if existing and not force:
+        return {"status": "already_analyzed", "candidates": [], "conflicts": existing}
+    combined = "\n\n".join(
+        f"[{row.get('section') or 'section'}"
+        f"{f' p.{row.get('page')}' if row.get('page') else ''}]\n{row.get('content') or ''}"
+        for row in chunks
+    )
+    analysis = analyze_rule_candidates(
+        get_config(),
+        filename=str(upload.get("original_name") or "uploaded source"),
+        source_id=source_id,
+        content=combined,
+        existing_rules=db.list_rules(),
+    )
+    created: list[dict[str, Any]] = []
+    for candidate in analysis.get("candidates", []):
+        matched = str(candidate.get("matched_rule_id") or "").strip()
+        created.append(
+            db.add_rule_conflict(
+                {
+                    "rule_id": matched or f"CANDIDATE-{uuid.uuid4().hex[:10].upper()}",
+                    "existing_version": RULEBOOK_VERSION if matched else "",
+                    "candidate_source_id": source_id,
+                    "candidate_value": candidate,
+                    "description": str(candidate.get("reason") or candidate.get("name") or "Rule candidate requires review."),
+                    "status": "open",
+                }
+            )
+        )
+    db.add_ai_run(
+        {
+            "run_type": "rule_candidate_analysis",
+            "quarter": str(upload.get("quarter") or "Setup"),
+            "model": str(analysis.get("model") or get_config().openai_model),
+            "status": str(analysis.get("status") or "completed"),
+            "input_summary": str(upload.get("original_name") or "")[:500],
+            "output_summary": f"{len(created)} rule candidates created for human review.",
+            "sources": [source_id],
+        }
+    )
+    return {**analysis, "conflicts": created}
 
 
 def _basic_credentials(header: str) -> tuple[str, str] | None:
@@ -117,6 +215,26 @@ def _error(status: int, exc: Exception) -> HTTPException:
     return HTTPException(status, str(exc) or exc.__class__.__name__)
 
 
+def _detected_company_number() -> int | None:
+    for run in db.list_report_imports():
+        metadata = (run.get("extracted_data") or {}).get("metadata") or {}
+        try:
+            value = int(metadata.get("company_number"))
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return None
+
+
+def _research_source_names() -> dict[str, str]:
+    return {
+        str(row.get("id")): str(row.get("original_name") or "")
+        for row in db.list_uploads()
+        if row.get("id")
+    }
+
+
 def _intelligence(quarter: str) -> dict[str, Any]:
     _quarter(quarter)
     settings = db.get_settings()
@@ -128,9 +246,200 @@ def _intelligence(quarter: str) -> dict[str, Any]:
     score = build_scorecard(quarter, finance_rows, operations, area_finance, assessment, settings.get("score_model"))
     financial = financial_position(quarter, finance_rows, area_finance, float(settings.get("cash_buffer_sf") or 0))
     forecast = q9_forecast(quarter, finance_rows, operations, score)
-    research = [row for row in db.list_research_results() if 0 < int(str(row.get("quarter", "Q0"))[1:] or 0) <= int(quarter[1:])]
-    recs = recommendations(quarter, financial, score, operations, research, strategy_profile)
-    return {"quarter": quarter, "financial": financial, "scorecard": score, "forecast_q9": forecast, "recommendations": recs, "research_results": research, "strategy_profile": strategy_profile}
+    research_raw = [row for row in db.list_research_results() if 0 < int(str(row.get("quarter", "Q0"))[1:] or 0) <= int(quarter[1:])]
+    research = enrich_research_results(research_raw, _detected_company_number(), _research_source_names())
+    recs = recommendations(quarter, financial, score, operations, research_raw, strategy_profile)
+    latest_operations = _latest_operations_as_of(quarter)
+    baseline = financial.get("consolidated", {})
+    baseline_score = forecast.get("score", {}).get("base")
+    for recommendation in recs:
+        action = {**recommendation.get("action_template", {}), "title": recommendation.get("title", "")}
+        simulation = simulate_portfolio(
+            quarter,
+            {
+                "name": f"בדיקת המלצה: {recommendation.get('title', '')}",
+                "budget_sf": baseline.get("available_budget_sf"),
+                "cash_buffer_sf": baseline.get("cash_buffer_sf"),
+                "actions": [action],
+            },
+            financial,
+            forecast,
+            latest_operations,
+        )
+        base_case = simulation.get("scenarios", {}).get("base", {})
+        sequence = (simulation.get("recommended_sequence") or [{}])[0]
+        score_delta = None
+        if base_case.get("q9_score") is not None and baseline_score is not None:
+            score_delta = round(float(base_case["q9_score"]) - float(baseline_score), 2)
+        profit_delta = round(float(base_case.get("net_profit_sf") or 0) - float(baseline.get("net_profit_sf") or 0), 2)
+        cash_delta = round(float(base_case.get("ending_cash_sf") or 0) - float(baseline.get("ending_cash_sf") or 0), 2)
+        debt_delta = round(float(base_case.get("debt_sf") or 0) - float(baseline.get("debt_sf") or 0), 2)
+        impact = {
+            "cost_sf": simulation.get("budget", {}).get("planned_cost_sf", 0),
+            "budget_remaining_sf": simulation.get("budget", {}).get("remaining_sf", 0),
+            "profit_delta_sf": profit_delta,
+            "cash_delta_sf": cash_delta,
+            "debt_delta_sf": debt_delta,
+            "q9_score_delta": score_delta,
+            "past_score_delta": sequence.get("past_score_delta"),
+            "future_score_delta": sequence.get("future_score_delta"),
+            "feasible": simulation.get("feasible", False),
+            "violations": simulation.get("violations", []),
+            "warnings": simulation.get("warnings", []),
+            "next_quarter": {
+                "profit_delta_sf": profit_delta,
+                "cash_delta_sf": cash_delta,
+                "debt_delta_sf": debt_delta,
+            },
+            "to_q9": {
+                "q9_score_delta": score_delta,
+                "past_score_delta": sequence.get("past_score_delta"),
+                "future_score_delta": sequence.get("future_score_delta"),
+            },
+            "rulebook_version": simulation.get("rulebook_version", RULEBOOK_VERSION),
+            "applied_rules": simulation.get("applied_rules", []),
+        }
+        action_is_specific = bool(action.get("area") or action.get("product") or action.get("amount_sf") or action.get("cost_sf"))
+        confidence = "בינונית" if len(recommendation.get("evidence", [])) >= 2 and action_is_specific else "נמוכה"
+        if not impact["feasible"]:
+            verdict = "לא לבצע לפני תיקון"
+            explanation = "הפעולה מפרה את מגבלת התקציב, רצפת המזומן או כלל משחק."
+            verdict_level = "critical"
+        elif action.get("type") in {"strategy_review", "cash_protection"}:
+            verdict = "לביצוע מיידי"
+            explanation = "זוהי פעולת בקרה מקדימה שמגינה על איכות ההחלטות ועל הנזילות."
+            verdict_level = "good"
+        elif score_delta is not None and score_delta > 0:
+            verdict = "מומלץ לבחינה"
+            explanation = "בתרחיש הבסיס הפעולה משפרת את אומדן Q9 ונשארת במסגרת התקציב."
+            verdict_level = "good"
+        elif profit_delta > 0 and cash_delta >= 0:
+            verdict = "מומלץ פיננסית"
+            explanation = "ההשפעה הכספית החזויה חיובית, אך תרומת Q9 עדיין אינה ודאית."
+            verdict_level = "good"
+        elif not action_is_specific:
+            verdict = "נדרשים פרטים"
+            explanation = "יש להשלים אזור, מוצר, כמות או עלות לפני החלטה."
+            verdict_level = "warning"
+        else:
+            verdict = "לבחון חלופה"
+            explanation = "התרחיש הנוכחי אינו מציג יתרון כלכלי מובהק ביחס למצב הקיים."
+            verdict_level = "warning"
+        recommendation["economic_impact"] = impact
+        recommendation["ai_recommendation"] = {
+            "verdict": verdict,
+            "level": verdict_level,
+            "explanation": explanation,
+            "confidence": confidence,
+            "what_changes_it": "נתוני מחיר, ביקוש, עלות, תזמון או מחקר שוק חדש עשויים לשנות את ההמלצה.",
+            "rulebook_version": RULEBOOK_VERSION,
+            "rule_citations": simulation.get("applied_rules", []),
+        }
+        recommendation["agent_prompt"] = (
+            f"נתח את ההחלטה '{recommendation.get('title', '')}' עבור {quarter}. "
+            "הסבר את ההשפעה על רווח, מזומן, חוב, תקציב וציון Q9; "
+            "השווה לחלופה שמרנית והצע סדר פעולות."
+        )
+    recommendation_actions = [
+        {
+            **recommendation.get("action_template", {}),
+            "_recommendation_id": recommendation.get("id"),
+            "title": recommendation.get("title", ""),
+        }
+        for recommendation in recs
+    ]
+    decision_dependencies = analyze_decision_dependencies(
+        quarter,
+        recommendation_actions,
+        latest_operations,
+        available_budget_sf=float(baseline.get("available_budget_sf") or 0),
+    )
+    dependency_nodes = {
+        str(node.get("id")): node
+        for node in decision_dependencies.get("nodes", [])
+    }
+    for recommendation in recs:
+        recommendation_id = str(recommendation.get("id") or "")
+        prerequisites = []
+        enables = []
+        coordinates = []
+        for edge in decision_dependencies.get("edges", []):
+            if edge.get("to") == recommendation_id:
+                source = dependency_nodes.get(str(edge.get("from")), {})
+                entry = {
+                    "id": edge.get("from"),
+                    "title": source.get("title", edge.get("from")),
+                    "kind": edge.get("kind"),
+                    "hard": edge.get("hard", False),
+                    "reason": edge.get("reason", ""),
+                    "timing": edge.get("timing", ""),
+                }
+                if edge.get("kind") == "coordination":
+                    coordinates.append(entry)
+                else:
+                    prerequisites.append(entry)
+            elif edge.get("from") == recommendation_id:
+                target = dependency_nodes.get(str(edge.get("to")), {})
+                entry = {
+                    "id": edge.get("to"),
+                    "title": target.get("title", edge.get("to")),
+                    "kind": edge.get("kind"),
+                    "hard": edge.get("hard", False),
+                    "reason": edge.get("reason", ""),
+                    "timing": edge.get("timing", ""),
+                }
+                if edge.get("kind") == "coordination":
+                    coordinates.append(entry)
+                else:
+                    enables.append(entry)
+        recommendation["dependencies"] = {
+            "prerequisites": prerequisites,
+            "enables": enables,
+            "coordinates_with": coordinates,
+            "gaps": [
+                gap
+                for gap in decision_dependencies.get("gaps", [])
+                if gap.get("action_id") == recommendation_id
+            ],
+            "conflicts": [
+                conflict
+                for conflict in decision_dependencies.get("conflicts", [])
+                if recommendation_id in conflict.get("actions", [])
+            ],
+            "sequence_step": next(
+                (
+                    row.get("step")
+                    for row in decision_dependencies.get("recommended_sequence", [])
+                    if row.get("id") == recommendation_id
+                ),
+                None,
+            ),
+        }
+        recommendation["agent_prompt"] += (
+            " אתר תלויות בהחלטות אחרות, תנאים מקדימים, התנגשויות וסדר ביצוע; "
+            "אל תנתח את ההחלטה כאילו היא עומדת לבדה."
+        )
+    return {
+        "quarter": quarter,
+        "financial": financial,
+        "scorecard": score,
+        "forecast_q9": forecast,
+        "recommendations": recs,
+        "decision_dependencies": decision_dependencies,
+        "optimization_objective": {
+            "primary": "מקסום ביצועי המשחק בכל נקודת זמן ועד Q9",
+            "score_model": "50% ביצועי עבר + 50% פוטנציאל עתידי",
+            "constraints": [
+                "שמירה על חוקי המשחק",
+                "שמירה על רצפת מזומן",
+                "מימון מלא של סל הפעולות",
+                "סדר ביצוע התואם לזמני ההשפעה",
+                "התאמה לאסטרטגיה המעודכנת",
+            ],
+        },
+        "research_results": research,
+        "strategy_profile": strategy_profile,
+    }
 
 
 def _latest_operations_as_of(quarter: str) -> list[dict[str, Any]]:
@@ -143,6 +452,109 @@ def _latest_operations_as_of(quarter: str) -> list[dict[str, Any]]:
     ]
     latest = max((int(str(row["quarter"])[1:]) for row in rows), default=0)
     return [row for row in rows if int(str(row["quarter"])[1:]) == latest]
+
+
+def _strategy_optimization(quarter: str) -> dict[str, Any]:
+    """Create a fresh rolling strategy draft without mutating approved data."""
+    quarter = _quarter(quarter)
+    intelligence = _intelligence(quarter)
+    financial = intelligence.get("financial", {})
+    forecast = intelligence.get("forecast_q9", {})
+    baseline = financial.get("consolidated", {})
+    operations = _latest_operations_as_of(quarter)
+    recommendation_rows = intelligence.get("recommendations", [])
+
+    def action_for(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **(row.get("action_template") or {}),
+            "_recommendation_id": row.get("id"),
+            "title": row.get("title", ""),
+        }
+
+    def value(row: dict[str, Any]) -> float:
+        impact = row.get("economic_impact") or {}
+        q9_delta = impact.get("q9_score_delta")
+        if q9_delta is not None:
+            return float(q9_delta)
+        past = float(impact.get("past_score_delta") or 0)
+        future = float(impact.get("future_score_delta") or 0)
+        return 0.5 * past + 0.5 * future
+
+    ranked = sorted(
+        recommendation_rows,
+        key=lambda row: (
+            not bool((row.get("economic_impact") or {}).get("feasible", False)),
+            -value(row),
+            -float(row.get("priority") or 0),
+        ),
+    )
+    control_types = {"strategy_review", "cash_protection", "price_change", "market_research"}
+    recommended_rows = [
+        row
+        for row in ranked
+        if bool((row.get("economic_impact") or {}).get("feasible", False))
+        and (value(row) > 0 or str((row.get("action_template") or {}).get("type")) in control_types)
+    ][:5]
+    if not recommended_rows:
+        recommended_rows = [
+            row
+            for row in ranked
+            if str((row.get("action_template") or {}).get("type")) in control_types
+        ][:3]
+
+    growth_types = {
+        "rd",
+        "grade_license",
+        "capacity",
+        "plant_construction",
+        "advertising",
+        "price_advertising",
+        "sales_offices",
+        "partnership",
+    }
+    defensive_types = {
+        "cash_protection",
+        "price_change",
+        "market_research",
+        "money_transfer",
+        "invest_borrow",
+        "loan",
+        "currency_conversion",
+    }
+    growth_rows = [
+        row
+        for row in ranked
+        if bool((row.get("economic_impact") or {}).get("feasible", False))
+        and str((row.get("action_template") or {}).get("type")) in growth_types
+    ][:5]
+    defensive_rows = [
+        row
+        for row in ranked
+        if bool((row.get("economic_impact") or {}).get("feasible", False))
+        and str((row.get("action_template") or {}).get("type")) in defensive_types
+    ][:5]
+
+    def run(name: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        return simulate_portfolio(
+            quarter,
+            {
+                "name": name,
+                "budget_sf": baseline.get("available_budget_sf"),
+                "cash_buffer_sf": baseline.get("cash_buffer_sf"),
+                "actions": [action_for(row) for row in rows],
+            },
+            financial,
+            forecast,
+            operations,
+        )
+
+    scenarios = {
+        "original": run("המשך האסטרטגיה המקורית", []),
+        "recommended": run("התאמה אסטרטגית מומלצת", recommended_rows),
+        "growth": run("תרחיש צמיחה", growth_rows),
+        "defensive": run("תרחיש הגנה", defensive_rows),
+    }
+    return build_strategy_optimization(quarter, intelligence, scenarios)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -185,6 +597,86 @@ def meta():
         "storage_bucket": config.supabase_bucket,
         "max_upload_mb": config.max_upload_bytes // (1024 * 1024),
         "decision_agent": agent_status(config),
+        "decision_actions": DECISION_ACTIONS,
+        "rulebook_version": RULEBOOK_VERSION,
+    }
+
+
+@app.get("/api/rulebook")
+def get_rulebook(
+    query: str = "",
+    domain: str = "",
+    area: str = "",
+    product: str = "",
+    knowledge_type: str = "",
+    enforcement: str = "",
+):
+    rows = search_rules(
+        db.list_rules(),
+        query=query,
+        domain=domain,
+        area=area,
+        product=product,
+        knowledge_type=knowledge_type,
+        enforcement=enforcement,
+    )
+    return {
+        "summary": rulebook_summary(db.list_rules()),
+        "sources": db.list_rule_sources(),
+        "conflicts": db.list_rule_conflicts("open"),
+        "rules": rows,
+    }
+
+
+@app.get("/api/rulebook/{rule_id}")
+def get_rulebook_rule(rule_id: str):
+    row = db.get_rule(rule_id)
+    if not row:
+        raise HTTPException(404, "Rule not found")
+    return row
+
+
+@app.post("/api/rulebook/check")
+def check_rulebook_action(payload: dict[str, Any]):
+    quarter = _quarter(str(payload.get("quarter") or "Q4"))
+    action = payload.get("action") if isinstance(payload.get("action"), dict) else payload
+    checks = evaluate_rulebook_action(
+        action,
+        quarter=quarter,
+        operations=_latest_operations_as_of(quarter),
+        strict=bool(payload.get("strict", True)),
+    )
+    violations = [item for item in checks if item.get("blocking") and item.get("status") == "fail"]
+    return {
+        "quarter": quarter,
+        "rulebook_version": RULEBOOK_VERSION,
+        "allowed": not violations,
+        "checks": checks,
+        "violations": violations,
+    }
+
+
+@app.post("/api/rulebook/conflicts/{conflict_id}/resolve")
+def resolve_rulebook_conflict(conflict_id: str, payload: dict[str, Any]):
+    status = str(payload.get("status") or "")
+    resolution = str(payload.get("resolution") or "").strip()
+    try:
+        row = db.resolve_rule_conflict(
+            conflict_id,
+            status,
+            resolution,
+            reviewed_by=str(payload.get("reviewed_by") or get_config().access_user),
+        )
+    except ValueError as exc:
+        raise _error(400, exc) from exc
+    if not row:
+        raise HTTPException(404, "Rule conflict not found")
+    return {
+        "conflict": row,
+        "note": (
+            "The candidate was reviewed. Approval marks it for the next Rulebook version; "
+            "it does not mutate the active version automatically."
+        ),
     }
 
 
@@ -297,8 +789,15 @@ async def upload_file(
         raise HTTPException(400, "הקובץ ריק")
     original = safe_filename(file.filename or "file")
     mime_type = file.content_type or mimetypes.guess_type(original)[0] or "application/octet-stream"
+    extraction = extract_document(content, original, mime_type, quarter, category)
+    detected_quarter = str((extraction.get("extracted_data") or {}).get("metadata", {}).get("detected_quarter") or "")
+    effective_quarter = detected_quarter if quarter == "Setup" and detected_quarter in QUARTERS else quarter
+    extraction["rule_validation"] = validate_report(
+        extraction.get("extracted_data") or {},
+        effective_quarter if effective_quarter in QUARTERS else "",
+    )
     date_path = datetime.now(timezone.utc).strftime("%Y/%m/%d")
-    storage_path = f"{quarter.lower()}/{date_path}/{uuid.uuid4().hex}_{original}"
+    storage_path = f"{effective_quarter.lower()}/{date_path}/{uuid.uuid4().hex}_{original}"
     checksum = hashlib.sha256(content).hexdigest()
     upload_result: dict[str, Any] = {}
     record: dict[str, Any] = {}
@@ -306,7 +805,7 @@ async def upload_file(
         upload_result = db.storage_upload(storage_path, content, mime_type)
         record = db.add_upload(
             {
-                "quarter": quarter,
+                "quarter": effective_quarter,
                 "category": category,
                 "original_name": original,
                 "storage_bucket": config.supabase_bucket,
@@ -321,12 +820,51 @@ async def upload_file(
                     "source_filename": file.filename or original,
                     "user_agent": request.headers.get("user-agent", "")[:300],
                     "app_version": APP_VERSION,
+                    "detected_quarter": detected_quarter,
+                    "parser_type": extraction.get("parser_type"),
                 },
             }
         )
-        extraction = extract_document(content, original, mime_type, quarter, category)
-        import_run = db.add_report_import({"upload_id": record["id"], "quarter": quarter, **extraction})
-        return {**record, "import_run": import_run}
+        import_run = db.add_report_import({"upload_id": record["id"], "quarter": effective_quarter, **extraction})
+        chunk_records: list[dict[str, Any]] = []
+        for chunk in _chunks_from_extraction(extraction):
+            chunk_records.append(
+                db.add_document_chunk(
+                    {
+                        **chunk,
+                        "upload_id": record["id"],
+                        "source_id": f"upload:{record['id']}",
+                    }
+                )
+            )
+        rule_analysis: dict[str, Any] = {"status": "not_applicable", "candidates": [], "conflicts": []}
+        if effective_quarter == "Setup" and chunk_records:
+            try:
+                rule_analysis = _analyze_uploaded_rule_source(record)
+            except Exception as analysis_exc:
+                db.add_ai_run(
+                    {
+                        "run_type": "rule_candidate_analysis",
+                        "quarter": "Setup",
+                        "model": get_config().openai_model,
+                        "status": "failed",
+                        "input_summary": original[:500],
+                        "error": str(analysis_exc)[:1000],
+                        "sources": [f"upload:{record['id']}"],
+                    }
+                )
+                rule_analysis = {
+                    "status": "analysis_failed",
+                    "candidates": [],
+                    "conflicts": [],
+                    "reason": str(analysis_exc)[:300],
+                }
+        return {
+            **record,
+            "import_run": import_run,
+            "document_chunks": len(chunk_records),
+            "rule_analysis": rule_analysis,
+        }
     except Exception as exc:
         if record.get("id"):
             try:
@@ -357,6 +895,27 @@ def download_upload(upload_id: str):
     )
 
 
+@app.post("/api/uploads/{upload_id}/analyze-rules")
+def analyze_uploaded_rules(upload_id: str, payload: dict[str, Any] | None = None):
+    record = db.get_upload(upload_id)
+    if not record:
+        raise HTTPException(404, "Uploaded source not found")
+    try:
+        return _analyze_uploaded_rule_source(record, force=bool((payload or {}).get("force", False)))
+    except Exception as exc:
+        raise _error(503, exc) from exc
+
+
+@app.get("/api/document-chunks")
+def get_document_chunks(
+    upload_id: str | None = None,
+    source_id: str | None = None,
+    query: str = "",
+    limit: int = 30,
+):
+    return db.list_document_chunks(upload_id=upload_id, source_id=source_id, query=query, limit=limit)
+
+
 @app.get("/api/imports")
 def get_imports(quarter: str | None = None):
     return db.list_report_imports(quarter)
@@ -371,6 +930,17 @@ def commit_import(import_id: str):
         return {"status": "already_committed", "import": run, "counts": {}}
     quarter = str(run.get("quarter") or "")
     data = run.get("extracted_data") or {}
+    validation = run.get("rule_validation") or validate_report(data, quarter if quarter in QUARTERS else "")
+    blocking = [item for item in validation.get("checks", []) if item.get("blocking") and item.get("status") == "fail"]
+    if blocking:
+        raise HTTPException(
+            409,
+            {
+                "message": "הדוח חסום לאישור עד לתיקון סתירות או נתונים בלתי אפשריים.",
+                "rulebook_version": validation.get("rulebook_version", RULEBOOK_VERSION),
+                "violations": blocking,
+            },
+        )
     if quarter not in QUARTERS and not data.get("strategy_profile"):
         raise HTTPException(400, "יש לקשר את הקובץ לרבעון Q1–Q9 לפני אישור הקליטה")
     upload = db.get_upload(str(run.get("upload_id") or ""))
@@ -392,7 +962,25 @@ def commit_import(import_id: str):
             db.upsert_strategy_profile({**data["strategy_profile"], "source_upload_id": run.get("upload_id")})
             counts["strategy_profile"] = 1
         committed = db.mark_report_import_committed(import_id, get_config().access_user)
-        return {"status": "ok", "import": committed, "counts": counts}
+        forecast_record = None
+        if quarter in QUARTERS:
+            planning_number = min(int(quarter[1:]) + 1, 9)
+            planning_quarter = f"Q{planning_number}"
+            intelligence = _intelligence(planning_quarter)
+            forecast_record = db.add_forecast(
+                {
+                    "quarter": planning_quarter,
+                    "forecast_type": "q9_after_actuals",
+                    "rulebook_version": RULEBOOK_VERSION,
+                    "assumptions": [
+                        {"type": "Actual", "source_quarter": quarter, "source_upload_id": run.get("upload_id")},
+                        {"type": "Rulebook", "version": RULEBOOK_VERSION},
+                    ],
+                    "result": intelligence.get("forecast_q9", {}),
+                    "confidence": "high" if run.get("confidence") == "גבוהה" else "medium",
+                }
+            )
+        return {"status": "ok", "import": committed, "counts": counts, "forecast": forecast_record}
     except Exception as exc:
         raise _error(400, exc) from exc
 
@@ -527,13 +1115,51 @@ def relevant_research(quarter: str, domain: str = ""):
     needle = domain.strip().lower()
     decisions = " ".join(f"{item.get('domain', '')} {item.get('title', '')}" for item in bundle["recommendations"]).lower()
     results = []
-    for row in db.list_research_results():
+    research_rows = enrich_research_results(db.list_research_results(), _detected_company_number(), _research_source_names())
+    for row in research_rows:
         if int(str(row.get("quarter", "Q0"))[1:] or 0) > int(quarter[1:]):
             continue
-        haystack = f"{row.get('title', '')} {row.get('key_result', '')} {' '.join(row.get('relevance_domains') or [])}".lower()
+        haystack = (
+            f"{row.get('title', '')} {row.get('key_result', '')} {row.get('decision_area', '')} "
+            f"{row.get('recommendation', '')} {' '.join(row.get('relevance_domains') or [])}"
+        ).lower()
         relevant = not needle or needle in haystack or any(token in haystack for token in decisions.split() if len(token) > 3)
         results.append({**row, "relevant": relevant})
     return {"quarter": quarter, "domain": domain, "results": sorted(results, key=lambda row: (not row["relevant"], str(row.get("title", "")))), "catalog": db.get_market_research_catalog()}
+
+
+@app.get("/api/insights/{quarter}")
+def cumulative_insights(quarter: str):
+    quarter = _quarter(quarter)
+    end = int(quarter[1:])
+    raw_research = [
+        row
+        for row in db.list_research_results()
+        if 0 < int(str(row.get("quarter", "Q0"))[1:] or 0) <= end
+    ]
+    enriched_research = enrich_research_results(
+        raw_research,
+        _detected_company_number(),
+        _research_source_names(),
+    )
+    trends = build_cumulative_trends(
+        db.list_finance(),
+        db.list_operations(),
+        raw_research,
+        quarter,
+    )
+    return {
+        "quarter": quarter,
+        "company_number": _detected_company_number(),
+        "trends": trends,
+        "research": enriched_research,
+        "research_count": len(enriched_research),
+        "decisions": [
+            row
+            for row in db.list_decisions()
+            if 0 < int(str(row.get("quarter", "Q0"))[1:] or 0) <= end
+        ],
+    }
 
 
 @app.get("/api/assessment/{quarter}")
@@ -552,6 +1178,11 @@ def put_assessment(quarter: str, payload: dict[str, Any]):
 @app.get("/api/intelligence/{quarter}")
 def intelligence(quarter: str):
     return _intelligence(_quarter(quarter))
+
+
+@app.get("/api/strategy-optimization/{quarter}")
+def strategy_optimization(quarter: str):
+    return _strategy_optimization(_quarter(quarter))
 
 
 @app.get("/api/reports/quarter/{quarter}")
@@ -574,13 +1205,25 @@ def cumulative_report(quarter: str):
     quarter = _quarter(quarter)
     end = int(quarter[1:])
     bundle = _intelligence(quarter)
+    finance_history = [
+        row
+        for row in db.list_finance()
+        if int(str(row.get("quarter", "Q0"))[1:] or 0) <= end
+    ]
+    actual_quarters = sorted(
+        {str(row.get("quarter")) for row in finance_history},
+        key=lambda value: int(value[1:]),
+    )
+    data_as_of = actual_quarters[-1] if actual_quarters else None
     return {
         **bundle,
-        "history": [db.dashboard_for_quarter(f"Q{i}") for i in range(1, end + 1)],
-        "finance_history": [row for row in db.list_finance() if int(str(row.get("quarter", "Q0"))[1:] or 0) <= end],
+        "history": [db.dashboard_for_quarter(value) for value in actual_quarters],
+        "finance_history": finance_history,
         "area_finance_history": [row for row in db.list_finance_by_area() if int(str(row.get("quarter", "Q0"))[1:] or 0) <= end],
         "decisions": [row for row in db.list_decisions() if int(str(row.get("quarter", "Q0"))[1:] or 0) <= end],
         "report_type": "cumulative",
+        "data_as_of": data_as_of,
+        "planning_quarter": quarter if data_as_of != quarter else None,
     }
 
 
@@ -588,7 +1231,27 @@ def cumulative_report(quarter: str):
 def simulate_actions(quarter: str, payload: dict[str, Any]):
     quarter = _quarter(quarter)
     bundle = _intelligence(quarter)
-    return simulate_portfolio(quarter, payload, bundle["financial"], bundle["forecast_q9"], _latest_operations_as_of(quarter))
+    result = simulate_portfolio(quarter, payload, bundle["financial"], bundle["forecast_q9"], _latest_operations_as_of(quarter))
+    db.add_optimization_run(
+        {
+            "quarter": quarter,
+            "optimization_type": "scenario_budget_sequence",
+            "rulebook_version": RULEBOOK_VERSION,
+            "constraints": {
+                "available_budget_sf": result.get("budget", {}).get("available_sf"),
+                "cash_buffer_sf": result.get("budget", {}).get("cash_buffer_sf"),
+            },
+            "candidates": payload.get("actions", []),
+            "result": result,
+        }
+    )
+    return result
+
+
+@app.get("/api/scenario-actions")
+def scenario_actions():
+    """Official decision-form catalog used by the scenario laboratory."""
+    return DECISION_ACTIONS
 
 
 @app.get("/api/scenario-portfolios")
@@ -605,6 +1268,98 @@ def post_scenario_portfolio(payload: dict[str, Any]):
         return db.add_scenario_portfolio({**payload, "quarter": quarter, "result": result})
     except Exception as exc:
         raise _error(400, exc) from exc
+
+
+@app.get("/api/decision-packs")
+def get_decision_packs(quarter: str | None = None):
+    return db.list_decision_packs(quarter)
+
+
+@app.post("/api/decision-packs")
+def create_decision_pack(payload: dict[str, Any]):
+    try:
+        quarter = _quarter(str(payload.get("quarter") or "Q4"))
+        actions = [dict(row) for row in payload.get("actions", []) if isinstance(row, dict)]
+        bundle = _intelligence(quarter)
+        consolidated = bundle.get("financial", {}).get("consolidated", {})
+        simulation = simulate_portfolio(
+            quarter,
+            {
+                "name": payload.get("name", f"{quarter} decision pack"),
+                "actions": actions,
+                "budget_sf": consolidated.get("available_budget_sf", 0),
+                "cash_buffer_sf": consolidated.get("cash_buffer_sf", 0),
+                "decision_pack": True,
+            },
+            bundle["financial"],
+            bundle["forecast_q9"],
+            _latest_operations_as_of(quarter),
+        )
+        validation = simulation.get("rule_validation", {})
+        status = "ready_for_team_review" if simulation.get("feasible") else "blocked"
+        pack = db.add_decision_pack(
+            {
+                "quarter": quarter,
+                "name": payload.get("name", f"{quarter} decision pack"),
+                "status": status,
+                "rulebook_version": RULEBOOK_VERSION,
+                "scenario_portfolio_id": payload.get("scenario_portfolio_id"),
+                "actions": actions,
+                "validation": validation,
+                "financial_impact": {
+                    "budget": simulation.get("budget", {}),
+                    "operating_effects": simulation.get("operating_effects", {}),
+                    "scenarios": simulation.get("scenarios", {}),
+                    "decision_dependencies": simulation.get("dependency_analysis", {}),
+                },
+                "q9_impact": {
+                    key: value.get("q9_score")
+                    for key, value in simulation.get("scenarios", {}).items()
+                },
+                "recommendation": payload.get("recommendation", ""),
+                "created_by": get_config().access_user,
+            }
+        )
+        evidence = []
+        for citation in simulation.get("applied_rules", []):
+            evidence.append(
+                db.add_recommendation_evidence(
+                    {
+                        "decision_pack_id": pack["id"],
+                        "recommendation_key": payload.get("name", f"{quarter} decision pack"),
+                        "evidence_type": "rule",
+                        "source_id": citation.get("source_id", ""),
+                        "source_page": citation.get("page", ""),
+                        "rule_id": citation.get("rule_id", ""),
+                        "payload": citation,
+                    }
+                )
+            )
+        return {**pack, "evidence": evidence}
+    except Exception as exc:
+        raise _error(400, exc) from exc
+
+
+@app.get("/api/decision-packs/{pack_id}")
+def get_decision_pack(pack_id: str):
+    row = db.get_decision_pack(pack_id)
+    if not row:
+        raise HTTPException(404, "Decision pack not found")
+    return {**row, "evidence": db.list_recommendation_evidence(pack_id)}
+
+
+@app.get("/api/decision-packs/{pack_id}/export")
+def export_decision_pack(pack_id: str):
+    row = db.get_decision_pack(pack_id)
+    if not row:
+        raise HTTPException(404, "Decision pack not found")
+    row = {**row, "evidence": db.list_recommendation_evidence(pack_id)}
+    content = json.dumps(row, ensure_ascii=False, indent=2, default=str)
+    return Response(
+        content=content,
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={row.get('quarter', 'Q')}_decision_pack.json"},
+    )
 
 
 @app.delete("/api/scenario-portfolios/{portfolio_id}", status_code=204)
@@ -643,6 +1398,7 @@ def get_agent_messages(thread_id: str):
 @app.post("/api/agent/chat")
 def agent_chat(payload: dict[str, Any]):
     question = str(payload.get("question") or "").strip()
+    manager_instructions = str(payload.get("manager_instructions") or "").strip()[:2000]
     if not question:
         raise HTTPException(400, "question is required")
     quarter = _quarter(str(payload.get("quarter") or "Q4"))
@@ -665,16 +1421,135 @@ def agent_chat(payload: dict[str, Any]):
             return {"recommendations": bundle["recommendations"], "sources": [f"{selected} recommendations"]}
         if name == "get_relevant_research":
             return relevant_research(selected, str(arguments.get("domain") or ""))
+        if name == "get_cumulative_insights":
+            return cumulative_insights(selected)
+        if name == "get_decision_catalog":
+            return {"actions": DECISION_ACTIONS, "sources": ["Data Log v1 decision rules"]}
+        if name == "search_rulebook":
+            rows = search_rules(
+                db.list_rules(),
+                query=str(arguments.get("query") or ""),
+                domain=str(arguments.get("domain") or ""),
+                area=str(arguments.get("area") or ""),
+                product=str(arguments.get("product") or ""),
+            )
+            return {
+                "rulebook_version": RULEBOOK_VERSION,
+                "rules": rows[:20],
+                "sources": [
+                    f"{row.get('source_id')} p.{row.get('source_page')} · {row.get('rule_id')} · v{row.get('version')}"
+                    for row in rows[:20]
+                ],
+            }
+        if name == "search_uploaded_sources":
+            rows = db.list_document_chunks(
+                source_id=str(arguments.get("source_id") or "") or None,
+                query=str(arguments.get("query") or ""),
+                limit=12,
+            )
+            return {
+                "excerpts": [
+                    {
+                        "source_id": row.get("source_id"),
+                        "page": row.get("page"),
+                        "section": row.get("section"),
+                        "content": str(row.get("content") or "")[:2500],
+                        "evidence_status": "uploaded_unapproved_source",
+                    }
+                    for row in rows
+                ],
+                "sources": [
+                    f"{row.get('source_id')} {row.get('section') or ''}"
+                    f"{f' p.{row.get('page')}' if row.get('page') else ''}"
+                    for row in rows
+                ],
+                "note": "Uploaded excerpts are evidence and cannot override the active Rulebook without team approval.",
+            }
         if name == "simulate_actions":
             simulation_payload = {"name": arguments.get("name", "Agent simulation"), "actions": arguments.get("actions", [])}
             return simulate_portfolio(selected, simulation_payload, bundle["financial"], bundle["forecast_q9"], _latest_operations_as_of(selected))
-        return {"error": "Unknown read-only tool"}
+        if name in {"validate_actions", "create_decision_pack_draft"}:
+            consolidated = bundle.get("financial", {}).get("consolidated", {})
+            actions = [dict(row) for row in arguments.get("actions", []) if isinstance(row, dict)]
+            simulation_payload = {
+                "name": arguments.get("name", "Agent validation"),
+                "actions": actions,
+                "budget_sf": consolidated.get("available_budget_sf", 0),
+                "cash_buffer_sf": consolidated.get("cash_buffer_sf", 0),
+                "decision_pack": True,
+            }
+            simulation = simulate_portfolio(
+                selected,
+                simulation_payload,
+                bundle["financial"],
+                bundle["forecast_q9"],
+                _latest_operations_as_of(selected),
+            )
+            if name == "validate_actions":
+                return {
+                    **simulation,
+                    "sources": [
+                        f"{row.get('source_id')} p.{row.get('source_page')} · {row.get('rule_id')}"
+                        for row in simulation.get("applied_rules", [])
+                    ],
+                }
+            pack = db.add_decision_pack(
+                {
+                    "quarter": selected,
+                    "name": arguments.get("name", f"{selected} Agent draft"),
+                    "status": "draft_blocked" if not simulation.get("feasible") else "draft",
+                    "rulebook_version": RULEBOOK_VERSION,
+                    "actions": actions,
+                    "validation": simulation.get("rule_validation", {}),
+                    "financial_impact": {
+                        "budget": simulation.get("budget", {}),
+                        "scenarios": simulation.get("scenarios", {}),
+                        "decision_dependencies": simulation.get("dependency_analysis", {}),
+                    },
+                    "q9_impact": {
+                        key: value.get("q9_score")
+                        for key, value in simulation.get("scenarios", {}).items()
+                    },
+                    "recommendation": arguments.get("recommendation", ""),
+                    "created_by": "Decision Agent",
+                }
+            )
+            return {
+                "decision_pack": pack,
+                "note": "Draft only. Team review is required; no data was submitted to INTOPIA.",
+                "sources": [
+                    f"{row.get('source_id')} p.{row.get('source_page')} · {row.get('rule_id')}"
+                    for row in simulation.get("applied_rules", [])
+                ],
+            }
+        return {"error": "Unknown tool"}
 
     try:
-        result = run_agent(get_config(), question, quarter, history, tool_handler)
+        result = run_agent(get_config(), question, quarter, history, tool_handler, manager_instructions)
     except Exception as exc:
+        db.add_ai_run(
+            {
+                "run_type": "chat",
+                "quarter": quarter,
+                "model": get_config().openai_model,
+                "status": "failed",
+                "input_summary": question[:500],
+                "error": str(exc)[:1000],
+            }
+        )
         raise _error(503, exc) from exc
     db.add_agent_message(thread_id, "assistant", result["answer"], result.get("sources", []))
+    db.add_ai_run(
+        {
+            "run_type": "chat",
+            "quarter": quarter,
+            "model": result.get("model", get_config().openai_model),
+            "input_summary": question[:500],
+            "output_summary": result.get("answer", "")[:1000],
+            "tool_calls": result.get("tool_calls", []),
+            "sources": result.get("sources", []),
+        }
+    )
     return {**result, "thread_id": thread_id}
 
 

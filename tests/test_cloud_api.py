@@ -4,6 +4,8 @@ import hashlib
 import io
 import zipfile
 
+from backup_service import APP_VERSION
+
 
 def test_health_and_cloud_configuration(client):
     response = client.get("/api/health")
@@ -51,7 +53,7 @@ def test_upload_metadata_checksum_download_and_delete(client):
     assert record["storage_path"].startswith("q3/")
     assert record["sha256"] == hashlib.sha256(content).hexdigest()
     assert record["size_bytes"] == len(content)
-    assert record["metadata"]["app_version"] == "0.5.0-decision-intelligence"
+    assert record["metadata"]["app_version"] == APP_VERSION
 
     download = client.get(f"/api/uploads/{record['id']}/download")
     assert download.status_code == 200

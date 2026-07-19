@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from cloud import CloudStore, get_store
 from seed_data import AREA_PRODUCT_DEFAULTS, MARKET_RESEARCH, MILESTONES, QUARTERS, STRATEGY_PRINCIPLES
 from analytics import DEFAULT_SCORE_MODEL
+from rulebook import CANONICAL_RULES, RULEBOOK_STATUS, RULEBOOK_VERSION, RULE_SOURCES
 
 
 TABLES = [
@@ -32,6 +34,16 @@ TABLES = [
     "quarter_snapshots",
     "agent_threads",
     "agent_messages",
+    "rule_sources",
+    "rulebook_versions",
+    "rules",
+    "rule_conflicts",
+    "document_chunks",
+    "ai_runs",
+    "recommendation_evidence",
+    "forecasts",
+    "decision_packs",
+    "optimization_runs",
 ]
 
 CONFLICT_COLUMNS = {
@@ -58,6 +70,16 @@ CONFLICT_COLUMNS = {
     "quarter_snapshots": "quarter",
     "agent_threads": "id",
     "agent_messages": "id",
+    "rule_sources": "source_id",
+    "rulebook_versions": "version",
+    "rules": "rule_id,version",
+    "rule_conflicts": "id",
+    "document_chunks": "id",
+    "ai_runs": "id",
+    "recommendation_evidence": "id",
+    "forecasts": "id",
+    "decision_packs": "id",
+    "optimization_runs": "id",
 }
 
 KEY_COLUMNS = {
@@ -65,6 +87,13 @@ KEY_COLUMNS = {
 }
 
 COMPANY_TABLES_DELETE_ORDER = [
+    "recommendation_evidence",
+    "optimization_runs",
+    "decision_packs",
+    "forecasts",
+    "ai_runs",
+    "document_chunks",
+    "rule_conflicts",
     "agent_messages",
     "agent_threads",
     "quarter_snapshots",
@@ -87,6 +116,13 @@ COMPANY_TABLES_DELETE_ORDER = [
 ]
 
 ALL_TABLES_DELETE_ORDER = [
+    "recommendation_evidence",
+    "optimization_runs",
+    "decision_packs",
+    "forecasts",
+    "ai_runs",
+    "document_chunks",
+    "rule_conflicts",
     "agent_messages",
     "agent_threads",
     "quarter_snapshots",
@@ -109,6 +145,9 @@ ALL_TABLES_DELETE_ORDER = [
     "strategy_principles",
     "market_research_catalog",
     "reference_area_product",
+    "rules",
+    "rulebook_versions",
+    "rule_sources",
     "settings",
 ]
 
@@ -206,6 +245,31 @@ def init_db() -> None:
     ]
     if milestones:
         store.upsert("milestones", milestones, "quarter")
+
+    source_rows = [{**row, "updated_at": now} for row in RULE_SOURCES]
+    store.upsert("rule_sources", source_rows, "source_id")
+    store.upsert(
+        "rulebook_versions",
+        {
+            "version": RULEBOOK_VERSION,
+            "status": RULEBOOK_STATUS,
+            "name": "INTOPIA current-run approved baseline",
+            "source_priority": [row["source_id"] for row in RULE_SOURCES],
+            "approved_by": "system baseline",
+            "approved_at": now,
+            "created_at": now,
+        },
+        "version",
+    )
+    rule_rows = [
+        {
+            **row,
+            "is_blocking": row.get("enforcement") == "block",
+            "updated_at": now,
+        }
+        for row in CANONICAL_RULES
+    ]
+    store.upsert("rules", rule_rows, "rule_id,version")
 
 
 def health() -> dict[str, Any]:
@@ -353,6 +417,7 @@ OPERATION_FIELDS = [
     "area",
     "product",
     "model",
+    "fx_to_sf",
     "grade",
     "plants",
     "plant_capacity",
@@ -505,6 +570,7 @@ def add_report_import(payload: dict[str, Any]) -> dict[str, Any]:
         "confidence": payload.get("confidence", "נמוכה"),
         "extracted_data": payload.get("extracted_data", {}),
         "issues": payload.get("issues", []),
+        "rule_validation": payload.get("rule_validation", {}),
         "reviewed_by": "",
         "created_at": utc_now(),
     }
@@ -540,6 +606,243 @@ def storage_download(path: str) -> bytes:
 
 def storage_delete(path: str) -> None:
     _store().delete_file(path)
+
+
+def list_rule_sources() -> list[dict[str, Any]]:
+    return _store().select("rule_sources", order="priority")
+
+
+def list_rulebook_versions() -> list[dict[str, Any]]:
+    return _store().select("rulebook_versions", order="created_at", descending=True)
+
+
+def list_rules(
+    *,
+    version: str = RULEBOOK_VERSION,
+    domain: str = "",
+    knowledge_type: str = "",
+    approval_status: str = "",
+) -> list[dict[str, Any]]:
+    rows = _store().select("rules", {"version": version}, order="rule_id")
+    if domain:
+        rows = [row for row in rows if str(row.get("domain") or "").casefold() == domain.casefold()]
+    if knowledge_type:
+        rows = [row for row in rows if str(row.get("knowledge_type") or "").casefold() == knowledge_type.casefold()]
+    if approval_status:
+        rows = [row for row in rows if str(row.get("approval_status") or "").casefold() == approval_status.casefold()]
+    return rows
+
+
+def get_rule(rule_id: str, version: str = RULEBOOK_VERSION) -> dict[str, Any]:
+    return _first(_store().select("rules", {"rule_id": rule_id, "version": version}, limit=1))
+
+
+def add_rule_conflict(payload: dict[str, Any]) -> dict[str, Any]:
+    values = {
+        "rule_id": payload.get("rule_id", ""),
+        "existing_version": payload.get("existing_version", RULEBOOK_VERSION),
+        "candidate_source_id": payload.get("candidate_source_id", ""),
+        "candidate_value": payload.get("candidate_value", {}),
+        "description": payload.get("description", ""),
+        "status": payload.get("status", "open"),
+        "resolution": payload.get("resolution", ""),
+        "created_at": utc_now(),
+        "updated_at": utc_now(),
+    }
+    result = _store().insert("rule_conflicts", values)
+    audit("create", "rule_conflicts", str(result["id"]), {"rule_id": values["rule_id"]})
+    return result
+
+
+def list_rule_conflicts(status: str | None = None) -> list[dict[str, Any]]:
+    return _store().select("rule_conflicts", {"status": status} if status else None, order="created_at", descending=True)
+
+
+def resolve_rule_conflict(conflict_id: str, status: str, resolution: str, reviewed_by: str = "team") -> dict[str, Any]:
+    if status not in {"approved_for_next_version", "rejected", "deferred"}:
+        raise ValueError("Unsupported conflict resolution status.")
+    result = _first(
+        _store().update(
+            "rule_conflicts",
+            {"id": conflict_id},
+            {
+                "status": status,
+                "resolution": resolution,
+                "updated_at": utc_now(),
+            },
+        )
+    )
+    if result:
+        audit(
+            "resolve",
+            "rule_conflicts",
+            conflict_id,
+            {"status": status, "resolution": resolution, "reviewed_by": reviewed_by},
+        )
+    return result
+
+
+def add_document_chunk(payload: dict[str, Any]) -> dict[str, Any]:
+    content = str(payload.get("content") or "").strip()
+    if not content:
+        raise ValueError("Document chunk content is required.")
+    values = {
+        "upload_id": payload.get("upload_id"),
+        "source_id": str(payload.get("source_id") or ""),
+        "page": payload.get("page"),
+        "section": str(payload.get("section") or ""),
+        "content": content,
+        "content_hash": str(payload.get("content_hash") or hashlib.sha256(content.encode("utf-8")).hexdigest()),
+        "metadata": payload.get("metadata") or {},
+        "created_at": utc_now(),
+    }
+    return _store().insert("document_chunks", values)
+
+
+def list_document_chunks(
+    *,
+    upload_id: str | None = None,
+    source_id: str | None = None,
+    query: str = "",
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    filters: dict[str, Any] = {}
+    if upload_id:
+        filters["upload_id"] = upload_id
+    if source_id:
+        filters["source_id"] = source_id
+    rows = _store().select("document_chunks", filters or None, order="created_at", descending=True)
+    terms = [term.casefold() for term in query.split() if term.strip()]
+    if terms:
+        rows = [
+            row
+            for row in rows
+            if all(
+                term in " ".join(
+                    [
+                        str(row.get("source_id") or ""),
+                        str(row.get("section") or ""),
+                        str(row.get("content") or ""),
+                    ]
+                ).casefold()
+                for term in terms
+            )
+        ]
+    return rows[: max(1, min(limit, 100))]
+
+
+def add_ai_run(payload: dict[str, Any]) -> dict[str, Any]:
+    return _store().insert(
+        "ai_runs",
+        {
+            "run_type": payload.get("run_type", "chat"),
+            "quarter": payload.get("quarter", ""),
+            "model": payload.get("model", ""),
+            "status": payload.get("status", "completed"),
+            "input_summary": payload.get("input_summary", ""),
+            "output_summary": payload.get("output_summary", ""),
+            "tool_calls": payload.get("tool_calls", []),
+            "sources": payload.get("sources", []),
+            "error": payload.get("error", ""),
+            "created_at": utc_now(),
+        },
+    )
+
+
+def add_forecast(payload: dict[str, Any]) -> dict[str, Any]:
+    return _store().insert(
+        "forecasts",
+        {
+            "quarter": payload.get("quarter", "Q4"),
+            "forecast_type": payload.get("forecast_type", "q9"),
+            "rulebook_version": payload.get("rulebook_version", RULEBOOK_VERSION),
+            "assumptions": payload.get("assumptions", []),
+            "result": payload.get("result", {}),
+            "confidence": payload.get("confidence", "medium"),
+            "created_at": utc_now(),
+        },
+    )
+
+
+def add_decision_pack(payload: dict[str, Any]) -> dict[str, Any]:
+    now = utc_now()
+    values = {
+        "quarter": payload.get("quarter", "Q4"),
+        "name": payload.get("name", "Decision pack"),
+        "status": payload.get("status", "draft"),
+        "rulebook_version": payload.get("rulebook_version", RULEBOOK_VERSION),
+        "scenario_portfolio_id": payload.get("scenario_portfolio_id"),
+        "actions": payload.get("actions", []),
+        "validation": payload.get("validation", {}),
+        "financial_impact": payload.get("financial_impact", {}),
+        "q9_impact": payload.get("q9_impact", {}),
+        "recommendation": payload.get("recommendation", ""),
+        "created_by": payload.get("created_by", "team"),
+        "created_at": now,
+        "updated_at": now,
+    }
+    result = _store().insert("decision_packs", values)
+    audit("create", "decision_packs", str(result["id"]), {"quarter": values["quarter"], "status": values["status"]})
+    return result
+
+
+def list_decision_packs(quarter: str | None = None) -> list[dict[str, Any]]:
+    return _store().select("decision_packs", {"quarter": quarter} if quarter else None, order="created_at", descending=True)
+
+
+def get_decision_pack(pack_id: str) -> dict[str, Any]:
+    return _first(_store().select("decision_packs", {"id": pack_id}, limit=1))
+
+
+def add_recommendation_evidence(payload: dict[str, Any]) -> dict[str, Any]:
+    return _store().insert(
+        "recommendation_evidence",
+        {
+            "decision_pack_id": payload.get("decision_pack_id"),
+            "recommendation_key": payload.get("recommendation_key", ""),
+            "evidence_type": payload.get("evidence_type", "rule"),
+            "source_id": payload.get("source_id", ""),
+            "source_page": str(payload.get("source_page", "")),
+            "rule_id": payload.get("rule_id", ""),
+            "payload": payload.get("payload", {}),
+            "created_at": utc_now(),
+        },
+    )
+
+
+def list_recommendation_evidence(decision_pack_id: str) -> list[dict[str, Any]]:
+    return _store().select(
+        "recommendation_evidence",
+        {"decision_pack_id": decision_pack_id},
+        order="created_at",
+    )
+
+
+def update_decision_pack(pack_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    values = {key: value for key, value in payload.items() if key in {
+        "name", "status", "actions", "validation", "financial_impact", "q9_impact", "recommendation"
+    }}
+    values["updated_at"] = utc_now()
+    result = _first(_store().update("decision_packs", {"id": pack_id}, values))
+    if not result:
+        raise KeyError("decision pack not found")
+    audit("update", "decision_packs", pack_id, {"status": result.get("status")})
+    return result
+
+
+def add_optimization_run(payload: dict[str, Any]) -> dict[str, Any]:
+    return _store().insert(
+        "optimization_runs",
+        {
+            "quarter": payload.get("quarter", "Q4"),
+            "optimization_type": payload.get("optimization_type", "budget"),
+            "rulebook_version": payload.get("rulebook_version", RULEBOOK_VERSION),
+            "constraints": payload.get("constraints", {}),
+            "candidates": payload.get("candidates", []),
+            "result": payload.get("result", {}),
+            "created_at": utc_now(),
+        },
+    )
 
 
 def list_decisions(quarter: str | None = None) -> list[dict[str, Any]]:

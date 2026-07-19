@@ -140,11 +140,140 @@ def test_simulation_enforces_budget_and_returns_three_outcomes(client):
     assert result["recommended_sequence"]
 
 
+def test_decisions_expose_dependencies_and_execution_order(client):
+    _seed_q1_to_q3(client)
+    intelligence = client.get("/api/intelligence/Q4")
+    assert intelligence.status_code == 200, intelligence.text
+    graph = intelligence.json()["decision_dependencies"]
+    assert graph["recommended_sequence"]
+    assert graph["budget_coordination"]["planned_cost_sf"] >= 0
+    assert all("dependencies" in row for row in intelligence.json()["recommendations"])
+
+    response = client.post(
+        "/api/simulation/Q4",
+        json={
+            "name": "Coordinated X-Y launch",
+            "actions": [
+                {"code": "A2-3", "type": "production", "area": "US", "product": "X", "units": 600, "cost_sf": 60_000},
+                {"code": "A2-4", "type": "production", "area": "US", "product": "Y", "units": 300, "x_grade": 5, "grade": 5, "cost_sf": 120_000},
+                {"code": "A1-2", "type": "price_advertising", "area": "US", "product": "Y", "change_pct": 0.02, "cost_sf": 20_000},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    dependencies = result["dependency_analysis"]
+    x_node = next(row for row in dependencies["nodes"] if row["code"] == "A2-3")
+    y_node = next(row for row in dependencies["nodes"] if row["code"] == "A2-4")
+    marketing_node = next(row for row in dependencies["nodes"] if row["code"] == "A1-2")
+    assert any(
+        edge["from"] == x_node["id"]
+        and edge["to"] == y_node["id"]
+        and edge["kind"] == "prerequisite"
+        for edge in dependencies["edges"]
+    )
+    assert any(
+        edge["from"] == y_node["id"]
+        and edge["to"] == marketing_node["id"]
+        and edge["kind"] == "coordination"
+        for edge in dependencies["edges"]
+    )
+    ordered_ids = [row["action"]["code"] for row in result["recommended_sequence"]]
+    assert ordered_ids.index("A2-3") < ordered_ids.index("A2-4")
+
+
+def test_strategy_optimization_rolls_from_latest_actual_to_q9(client):
+    strategy_text = """אסטרטגיית החברה
+יעד Q9: רמת Y7 ונתח שוק 25%
+מיקוד: טכנולוגיה ורווחיות
+אין להקים מפעל ללא הוכחת ביקוש
+מינימום מזומן: 300000 SF
+""".encode("utf-8")
+    uploaded = client.post(
+        "/api/uploads",
+        data={"quarter": "Setup", "category": "אסטרטגיה ראשונית"},
+        files={"file": ("strategy.txt", strategy_text, "text/plain")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert client.post(f"/api/imports/{uploaded.json()['import_run']['id']}/commit").status_code == 200
+
+    assert client.put(
+        "/api/finance/Q1",
+        json={
+            "revenue_sf": 1_000_000,
+            "gross_profit_sf": 350_000,
+            "net_profit_sf": 80_000,
+            "ending_cash_sf": 600_000,
+            "debt_sf": 120_000,
+        },
+    ).status_code == 200
+    first = client.get("/api/strategy-optimization/Q4")
+    assert first.status_code == 200, first.text
+    first_data = first.json()
+    assert first_data["status"] in {"ready", "blocked"}
+    assert first_data["actual_as_of"] == "Q1"
+    assert first_data["next_decision_quarter"] == "Q2"
+    assert first_data["horizon"] == [f"Q{index}" for index in range(2, 10)]
+    assert first_data["objective"]["past_weight"] == 0.5
+    assert first_data["objective"]["future_weight"] == 0.5
+    assert first_data["source_strategy"]["approved"] is True
+    assert len(first_data["scenarios"]) == 4
+    assert len(first_data["recommended_plan"]["roadmap"]) == 8
+
+    assert client.put(
+        "/api/finance/Q2",
+        json={
+            "revenue_sf": 1_200_000,
+            "gross_profit_sf": 420_000,
+            "net_profit_sf": 110_000,
+            "ending_cash_sf": 680_000,
+            "debt_sf": 110_000,
+        },
+    ).status_code == 200
+    second = client.get("/api/strategy-optimization/Q4")
+    assert second.status_code == 200, second.text
+    second_data = second.json()
+    assert second_data["actual_as_of"] == "Q2"
+    assert second_data["next_decision_quarter"] == "Q3"
+    assert second_data["horizon"][0] == "Q3"
+    assert len(second_data["recommended_plan"]["roadmap"]) == 7
+
+
+def test_strategy_optimization_is_read_only_and_explains_missing_strategy(client):
+    assert client.put(
+        "/api/finance/Q1",
+        json={"revenue_sf": 500_000, "net_profit_sf": 20_000, "ending_cash_sf": 200_000},
+    ).status_code == 200
+    before = client.get("/api/finance/Q1").json()
+    response = client.get("/api/strategy-optimization/Q4")
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["status"] == "needs_strategy"
+    assert result["source_strategy"]["approved"] is False
+    assert any(gate["title"] == "לא אושרה אסטרטגיה ראשונית" for gate in result["recommended_plan"]["decision_gates"])
+    assert client.get("/api/finance/Q1").json() == before
+
+
+def test_strategy_optimization_does_not_treat_planning_quarter_as_actual(client):
+    response = client.get("/api/strategy-optimization/Q4")
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["status"] == "needs_data"
+    assert result["actual_as_of"] is None
+    assert result["next_decision_quarter"] is None
+    assert result["horizon"] == []
+    assert all(scenario["feasible"] is False for scenario in result["scenarios"])
+    assert any("Actual" in gate["title"] for gate in result["recommended_plan"]["decision_gates"])
+
+
 def test_decision_agent_is_optional_and_never_requires_a_browser_key(client):
     status = client.get("/api/agent/status")
     assert status.status_code == 200
     assert status.json()["enabled"] is False
-    assert "api_key" not in status.text.lower()
+    # The readiness response may name the missing server-side environment
+    # variable, but it must never expose an actual secret value.
+    assert "sk-" not in status.text.lower()
+    assert "openai_api_key" in [item.lower() for item in status.json()["missing"]]
 
     chat = client.post("/api/agent/chat", json={"quarter": "Q4", "question": "What should we do?"})
     assert chat.status_code == 503

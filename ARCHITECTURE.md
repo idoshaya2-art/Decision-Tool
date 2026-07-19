@@ -1,4 +1,4 @@
-# EMBA TAU Simulation v0.5 Architecture
+# EMBA TAU Simulation AI Decision OS v1.0 Architecture
 
 ```text
 Team browser
@@ -39,6 +39,9 @@ Render FastAPI service
 - `agent_service.py` — optional OpenAI Responses API orchestration with read-only function tools.
 - `backup_service.py` — complete portable ZIP with integrity checks.
 - `db.py` / `cloud.py` — repository layer over Supabase Data and Storage APIs.
+- `rulebook.py` — Rulebook versioned, deterministic rule checks, report validation and portfolio enforcement.
+- `agent_service.py` — Responses API orchestration with server-side tools and auditable AI runs.
+- `analytics.py` — financial state, Q9 forecast, scenarios, budget sequencing and economic impacts.
 
 ## Tests
 
