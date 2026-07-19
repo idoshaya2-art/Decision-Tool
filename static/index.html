@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>EMBA TAU Simulation</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=1.1.0">
+  <link rel="stylesheet" href="/static/styles.css?v=1.1.1">
 </head>
 <body>
   <header class="topbar">
@@ -168,6 +168,7 @@
 
       <section id="section-finance" class="page">
         <div class="page-head"><div><p class="eyebrow">FINANCIAL POSITION</p><h1>מצב כספי</h1><p>חברה מאוחדת ולפי כל מדינה, כולל מזומן פנוי, התחייבויות והון חוזר.</p></div><select id="financeAreaSelect" aria-label="בחירת תצוגה כספית"></select></div>
+        <div id="financeDataStatus" class="data-status-card warning" role="status" aria-live="polite"></div>
         <article class="panel filter-bar">
           <div><strong>טווח ניתוח</strong><small>בחרו רבעון בודד או תוצאה מצטברת</small></div>
           <label>תצוגה<select id="financeModeSelect"><option value="quarter">רבעון נבחר</option><option value="cumulative">מצטבר</option></select></label>
@@ -377,6 +378,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js?v=1.1.0" defer></script>
+  <script src="/static/app.js?v=1.1.1" defer></script>
 </body>
 </html>

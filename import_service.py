@@ -266,12 +266,18 @@ def _intopia_finance(tables: dict[str, list[list[Any]]]) -> dict[str, Any]:
     balance = tables["Balance Sheet"]
     income = tables["Income Statement"]
     sales_rows = (7, 8, 9, 10, 15, 16, 17, 18)
+    interest_bearing_debt = (
+        _sum_cells(balance, (29,), (3, 5, 7))
+        + _sum_cells(balance, (33, 34), (8,))
+    )
     return {
         "revenue_sf": round(_sum_cells(income, sales_rows, (9,)), 2),
         "gross_profit_sf": round(_number(_cell(income, 21, 9)) or 0, 2),
         "net_profit_sf": round(_number(_cell(income, 57, 9)) or 0, 2),
         "ending_cash_sf": round(_number(_cell(balance, 6, 9)) or 0, 2),
-        "debt_sf": round(_number(_cell(balance, 36, 9)) or 0, 2),
+        # TOTAL LIABILITIES also contains trade payables and supplier credit.
+        # Debt is limited to bank loans and long-term bonds.
+        "debt_sf": round(interest_bearing_debt, 2),
         "ar_sf": round(_sum_cells(balance, (7, 8), (9,)), 2),
         "ap_sf": round(_number(_cell(balance, 30, 9)) or 0, 2),
         "research_budget_sf": round(_number(_cell(income, 45, 9)) or 0, 2),
@@ -310,6 +316,11 @@ def _intopia_area_finance(tables: dict[str, list[list[Any]]]) -> list[dict[str, 
         balance_column = int(columns["balance"])
         total_column = int(columns["income_total"])
         product_columns = tuple(columns["products"])
+        debt_lc = (
+            _sum_cells(balance, (33, 34), (balance_column,))
+            if area == "Liechtenstein"
+            else _sum_cells(balance, (29,), (balance_column,))
+        )
         rows.append(
             {
                 "area": area,
@@ -319,7 +330,7 @@ def _intopia_area_finance(tables: dict[str, list[list[Any]]]) -> list[dict[str, 
                 "gross_profit_lc": round(_sum_cells(income, (21,), product_columns), 2) if product_columns else 0,
                 "net_profit_lc": round(_number(_cell(income, 57, total_column)) or 0, 2),
                 "ending_cash_lc": round(_number(_cell(balance, 6, balance_column)) or 0, 2),
-                "debt_lc": round(_number(_cell(balance, 36, balance_column)) or 0, 2),
+                "debt_lc": round(debt_lc, 2),
                 "ar_lc": round(_sum_cells(balance, (7, 8), (balance_column,)), 2),
                 "ap_lc": round(_number(_cell(balance, 30, balance_column)) or 0, 2),
                 "inventory_value_lc": round(_number(_cell(balance, 13, balance_column)) or 0, 2),

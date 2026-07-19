@@ -112,6 +112,7 @@ def _financial_health(
     current_liabilities = num(values.get("current_liabilities_sf"))
     equity = num(values.get("equity_sf"))
     working_capital = num(values.get("working_capital_sf"))
+    operating_cash_flow_available = values.get("operating_cash_flow_sf") is not None
     operating_cash_flow = num(values.get("operating_cash_flow_sf"))
     available_budget = num(values.get("available_budget_sf"))
     commitments = num(values.get("capex_commitments_sf"))
@@ -200,7 +201,7 @@ def _financial_health(
         leverage_text = f"חוב להון {debt_to_equity:.2f}" if debt_to_equity is not None else "אין חוב מהותי שזוהה."
     add_check("leverage", "מאזן ומינוף", leverage_level, f"{debt:,.0f} SF חוב", leverage_text)
 
-    if operating_cash_flow == 0:
+    if not operating_cash_flow_available:
         cashflow_level = "unknown"
         cashflow_text = "תזרים מפעילות שוטפת לא זוהה בדוח."
     elif operating_cash_flow < 0:
@@ -209,7 +210,8 @@ def _financial_health(
     else:
         cashflow_level = "good"
         cashflow_text = "הפעילות השוטפת מייצרת מזומן."
-    add_check("cashflow", "תזרים תפעולי", cashflow_level, f"{operating_cash_flow:,.0f} SF", cashflow_text)
+    cashflow_value = f"{operating_cash_flow:,.0f} SF" if operating_cash_flow_available else "לא זמין בדוח"
+    add_check("cashflow", "תזרים תפעולי", cashflow_level, cashflow_value, cashflow_text)
 
     if consolidated:
         if available_budget <= 0:
@@ -286,7 +288,9 @@ def financial_position(
     current_liabilities = sum(area_sf(row, "current_liabilities_lc") for row in current_areas)
     equity = sum(area_sf(row, "equity_lc") for row in current_areas)
     total_investment = sum(area_sf(row, "total_investment_lc") for row in current_areas)
-    operating_cash_flow = sum(area_sf(row, "operating_cash_flow_lc") for row in current_areas)
+    operating_cash_flow_values = [area_sf(row, "operating_cash_flow_lc") for row in current_areas]
+    operating_cash_flow_available = any(abs(value) > 0.000001 for value in operating_cash_flow_values)
+    operating_cash_flow = sum(operating_cash_flow_values) if operating_cash_flow_available else None
     ar = sum(area_sf(row, "ar_lc") for row in current_areas) or num(latest.get("ar_sf"))
     ap = sum(area_sf(row, "ap_lc") for row in current_areas) or num(latest.get("ap_sf"))
     working_capital = current_assets - current_liabilities if current_assets or current_liabilities else num(latest.get("ar_sf")) - num(latest.get("ap_sf")) + inventory
@@ -310,7 +314,11 @@ def financial_position(
                 "current_liabilities_sf": round(area_sf(row, "current_liabilities_lc"), 2),
                 "equity_sf": round(area_sf(row, "equity_lc"), 2),
                 "total_investment_sf": round(area_sf(row, "total_investment_lc"), 2),
-                "operating_cash_flow_sf": round(area_sf(row, "operating_cash_flow_lc"), 2),
+                "operating_cash_flow_sf": (
+                    round(area_sf(row, "operating_cash_flow_lc"), 2)
+                    if abs(area_sf(row, "operating_cash_flow_lc")) > 0.000001
+                    else None
+                ),
                 "working_capital_sf": round(area_sf(row, "current_assets_lc") - area_sf(row, "current_liabilities_lc"), 2),
                 "capex_commitments_sf": round(area_commitments, 2),
                 "available_budget_sf": round(max(0.0, cash_sf - area_commitments), 2),
@@ -331,19 +339,57 @@ def financial_position(
         "current_liabilities_sf": round(current_liabilities, 2),
         "equity_sf": round(equity, 2),
         "total_investment_sf": round(total_investment, 2),
-        "operating_cash_flow_sf": round(operating_cash_flow, 2),
+        "operating_cash_flow_sf": round(operating_cash_flow, 2) if operating_cash_flow is not None else None,
         "working_capital_sf": round(working_capital, 2),
         "capex_commitments_sf": round(commitments, 2),
         "cash_buffer_sf": round(max(0.0, cash_buffer_sf), 2),
+        "cash_buffer_configured": cash_buffer_sf > 0,
         "available_budget_sf": round(available_budget, 2),
     }
     health = _financial_health(consolidated_values, cash_buffer_sf=max(0.0, cash_buffer_sf), consolidated=True)
     consolidated_values["health"] = health
 
+    requested_number = quarter_number(quarter)
+    data_number = quarter_number(data_as_of) if data_as_of else 0
+    expected_number = requested_number if data_number >= requested_number else max(1, requested_number - 1)
+    expected_as_of = f"Q{expected_number}"
+    actual_quarters = {
+        str(row.get("quarter"))
+        for row in [*history, *available_area_rows]
+        if quarter_number(str(row.get("quarter", ""))) > 0
+    }
+    missing_quarters = [
+        f"Q{number}"
+        for number in range(1, expected_number + 1)
+        if f"Q{number}" not in actual_quarters
+    ]
+    coverage_complete = bool(data_as_of) and not missing_quarters and data_number >= expected_number
+    if not data_as_of:
+        coverage_message = "לא אושר עדיין דוח Actual. אין להסתמך על המסך לקבלת החלטות."
+        coverage_level = "critical"
+    elif coverage_complete:
+        coverage_message = f"נתוני Actual מלאים עד {data_as_of}."
+        coverage_level = "good"
+    else:
+        missing_text = ", ".join(missing_quarters) or expected_as_of
+        coverage_message = (
+            f"המסך מציג נתונים מאושרים עד {data_as_of} בלבד. "
+            f"חסרים {missing_text}; אין לראות בהם מצב פתיחה מלא ל-{quarter}."
+        )
+        coverage_level = "warning"
+
     return {
         "quarter": quarter,
         "data_as_of": data_as_of,
         "area_data_as_of": latest_area_quarter or None,
+        "actual_coverage": {
+            "complete": coverage_complete,
+            "level": coverage_level,
+            "message": coverage_message,
+            "data_as_of": data_as_of or None,
+            "expected_as_of": expected_as_of,
+            "missing_quarters": missing_quarters,
+        },
         "consolidated": consolidated_values,
         "health": health,
         "areas": sorted(by_area, key=lambda row: str(row.get("area", ""))),

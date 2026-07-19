@@ -445,6 +445,11 @@ function renderFinancePage() {
   const row = financeRangeView(selected) || financeView(selected);
   const health = row.health || {};
   const ratios = {...(health.ratios || {}), ...(row._range_ratios || {})};
+  const financial = state.financeRange?.intelligence?.financial || state.intelligence?.financial || {};
+  const coverage = financial.actual_coverage || {};
+  const statusElement = $("#financeDataStatus");
+  statusElement.className = `data-status-card ${coverage.level || "critical"}`;
+  statusElement.textContent = coverage.message || "לא אושר עדיין דוח Actual. אין להסתמך על המסך לקבלת החלטות.";
   renderHealthBadge($("#financeHealthBadge"), health);
   $("#financeHealthHeadline").textContent = health.headline || "יש לאשר נתונים כספיים לצורך אבחון.";
   $("#financeHealthChecks").innerHTML = (health.checks || []).length ? health.checks.map(item => `<div class="health-check ${esc(item.level)}"><span class="health-dot"></span><div><strong>${esc(item.label)}</strong><small>${esc(item.explanation)}</small></div><b>${esc(item.value)}</b></div>`).join("") : '<div class="empty-copy">לא קיימים מספיק נתונים לבדיקת נזילות, רווחיות ומינוף.</div>';
@@ -465,9 +470,9 @@ function renderFinancePage() {
     ["הון עצמי", sf(row.equity_sf)], ["יחס חוב להון", ratios.debt_to_equity == null ? "—" : fmt(ratios.debt_to_equity, 2)],
   ].map(([label, value]) => `<div class="metric-row"><span>${label}</span><strong>${value}</strong></div>`).join("");
   $("#liquiditySummary").innerHTML = [
-    ["מזומן", sf(row.ending_cash_sf)], ["תזרים מפעילות שוטפת", sf(row.operating_cash_flow_sf)],
+    ["מזומן", sf(row.ending_cash_sf)], ["תזרים מפעילות שוטפת", row.operating_cash_flow_sf == null ? "לא זמין בדוח" : sf(row.operating_cash_flow_sf)],
     ["הון חוזר", sf(row.working_capital_sf)], ["יחס שוטף", ratios.current_ratio == null ? "—" : fmt(ratios.current_ratio, 2)],
-    ["רצפת מזומן", sf(row.cash_buffer_sf)], ["תקציב פנוי להחלטות", sf(row.available_budget_sf)],
+    ["רצפת מזומן", row.cash_buffer_configured === false ? "לא הוגדרה" : sf(row.cash_buffer_sf)], ["תקציב פנוי להחלטות", sf(row.available_budget_sf)],
   ].map(([label, value]) => `<div class="metric-row"><span>${label}</span><strong>${value}</strong></div>`).join("");
   const areas = state.financeRange?.intelligence?.financial?.areas || state.intelligence?.financial?.areas || [];
   $("#areaFinanceBody").innerHTML = areas.length ? areas.map(item => `<tr><td>${esc(item.area)}</td><td><span class="health-badge ${esc(item.health?.level || "unknown")}">${esc(item.health?.status || "—")}</span></td><td>${esc(item.currency)}</td><td>${fmt(item.revenue_sf)}</td><td>${fmt(item.net_profit_sf)}</td><td>${fmt(item.ending_cash_sf)}</td><td>${fmt(item.debt_sf)}</td><td>${fmt(item.inventory_value_sf)}</td><td>${fmt(item.available_budget_sf)}</td></tr>`).join("") : '<tr><td colspan="9" class="empty-copy">לא נקלטו עדיין נתונים לפי מדינה.</td></tr>';

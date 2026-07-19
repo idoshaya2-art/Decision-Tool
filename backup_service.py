@@ -13,7 +13,7 @@ import db
 
 BACKUP_FORMAT = "intopia-dss-cloud-backup"
 BACKUP_VERSION = 1
-APP_VERSION = "1.1.0-strategy-optimization"
+APP_VERSION = "1.1.1-financial-actuals-fix"
 
 
 class BackupError(ValueError):

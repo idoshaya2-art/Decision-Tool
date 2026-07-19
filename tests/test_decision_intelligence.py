@@ -60,11 +60,36 @@ def test_q4_planning_uses_q1_to_q3_actuals(client):
     data = result.json()
     assert data["financial"]["data_as_of"] == "Q3"
     assert data["financial"]["area_data_as_of"] == "Q3"
+    assert data["financial"]["actual_coverage"]["complete"] is True
+    assert data["financial"]["actual_coverage"]["expected_as_of"] == "Q3"
     assert data["financial"]["consolidated"]["revenue_sf"] == 1_450_000
+    assert data["financial"]["consolidated"]["operating_cash_flow_sf"] is None
+    assert data["financial"]["consolidated"]["cash_buffer_configured"] is False
     assert data["financial"]["areas"][0]["area"] == "US"
     assert data["scorecard"]["past"]["values"]["net_profit_sf"] == 345_000
     assert data["forecast_q9"]["to_quarter"] == "Q9"
     assert data["recommendations"]
+
+
+def test_q4_finance_warns_when_only_q1_actual_is_available(client):
+    assert client.put(
+        "/api/finance/Q1",
+        json={
+            "revenue_sf": 0,
+            "net_profit_sf": -821_543,
+            "ending_cash_sf": 6_562_577,
+            "debt_sf": 0,
+        },
+    ).status_code == 200
+
+    data = client.get("/api/intelligence/Q4").json()["financial"]
+    coverage = data["actual_coverage"]
+    assert data["data_as_of"] == "Q1"
+    assert coverage["complete"] is False
+    assert coverage["expected_as_of"] == "Q3"
+    assert coverage["missing_quarters"] == ["Q2", "Q3"]
+    assert "Q1" in coverage["message"]
+    assert "Q4" in coverage["message"]
 
 
 def test_file_import_review_commit_and_persistence(client):

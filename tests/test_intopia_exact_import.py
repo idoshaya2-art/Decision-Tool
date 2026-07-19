@@ -17,6 +17,13 @@ def _quarter_workbook() -> bytes:
     balance["A1"] = "COMPANY 8"
     balance["I6"] = 1_250_000
     balance["I22"] = 4_000_000
+    balance["C29"] = 200_000
+    balance["E29"] = 300_000
+    balance["G29"] = 400_000
+    balance["H33"] = 500_000
+    balance["H34"] = 100_000
+    balance["I33"] = 500_000
+    balance["I34"] = 100_000
     balance["I36"] = 1_700_000
     balance["I49"] = 4_000_000
     income = workbook["Income Statement"]
@@ -68,7 +75,10 @@ def test_exact_intopia_parser_detects_quarter_and_paid_research():
     assert extracted["metadata"]["detected_quarter"] == "Q2"
     assert extracted["metadata"]["company_number"] == 8
     assert extracted["finance"]["revenue_sf"] == 600_000
+    assert extracted["finance"]["debt_sf"] == 1_500_000
     assert len(extracted["finance_by_area"]) == 4
+    debts = {row["area"]: row["debt_lc"] for row in extracted["finance_by_area"]}
+    assert debts == {"USA": 200_000, "Europe": 300_000, "Brazil": 400_000, "Liechtenstein": 600_000}
     assert len(extracted["operations"]) == 12
     studies = {row["study_id"]: row for row in extracted["research_results"]}
     assert studies[41]["numeric_data"]["ranges"][1] == {"area": "Europe", "low_pct": 20.0, "high_pct": 28.0}
