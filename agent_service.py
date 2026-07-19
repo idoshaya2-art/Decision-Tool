@@ -22,6 +22,13 @@ operating cash flow, working capital and available decision budget. For a decisi
 at least the current plan and one alternative, quantify cost/profit/cash/debt/Q9 impact when the tools
 support it, state confidence, and identify what could change the recommendation. End decision answers
 with a short prioritized action list that fits the available budget and protects the cash floor.
+Before answering any liquidity, funding, cash-transfer or "what should we do now" question, call both
+get_financial_position and get_liquidity_transfer_plan. Audit cash by area and currency, supplier/current
+liabilities, debt, commitments and the approved cash floor. If the deterministic plan recommends a transfer,
+state: source, destination, net SF amount, source-currency amount, estimated FX fee, cash left at source,
+cash after transfer at destination, and the explicit reserve-policy assumption. Never replace a calculated
+amount with vague language such as "move some cash". If exact payment dates are missing, give the calculated
+management-policy amount and clearly state which missing input could change it.
 Never assess an important decision in isolation: identify prerequisite decisions, shared budget,
 timing dependencies, X-to-Y supply dependencies, decisions that must be coordinated, and conflicts.
 State the executable order, explain which action unlocks another, and evaluate the combined portfolio
@@ -49,6 +56,16 @@ TOOLS = [
         "type": "function",
         "name": "get_financial_position",
         "description": "Get consolidated and country-level financial position, available budget and commitments.",
+        "parameters": {"type": "object", "properties": {"quarter": {"type": "string"}}, "required": ["quarter"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_liquidity_transfer_plan",
+        "description": (
+            "Get the deterministic cross-area liquidity allocation: cash concentration, reserve targets, "
+            "funding gaps, transfer amounts, currencies, FX fees and residual cash."
+        ),
         "parameters": {"type": "object", "properties": {"quarter": {"type": "string"}}, "required": ["quarter"], "additionalProperties": False},
         "strict": True,
     },

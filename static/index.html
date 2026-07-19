@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>EMBA TAU Simulation</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=1.1.3">
+  <link rel="stylesheet" href="/static/styles.css?v=1.1.5">
 </head>
 <body>
   <header class="topbar">
@@ -285,6 +285,7 @@
             </label>
             <div class="quick-prompts" aria-label="שאלות מהירות">
               <button type="button" data-agent-prompt="נתח את המצב הפיננסי הנוכחי: נזילות, רווח והפסד, מאזן, תזרים, חוב והון חוזר. מה תקין ומה דורש פעולה?">אבחון פיננסי</button>
+              <button type="button" data-agent-prompt="בדוק את המזומן בכל אזור ובכל מטבע מול חובות ספקים, התחייבויות שוטפות, חוב, השקעות ורצפת המזומן. אם נדרשת העברה, ציין בדיוק: מאיזה אזור ומטבע, לאיזה אזור, כמה נטו וכמה ברוטו, עמלת המרה, יתרת מזומן בכל צד אחרי ההעברה, ומהי ההנחה הניהולית ששימשה לחישוב.">העברת נזילות מדויקת</button>
               <button type="button" data-agent-prompt="תן לי שלוש החלטות מומלצות לרבעון הפעיל, כולל השפעה על רווח, מזומן וציון Q9, במסגרת התקציב.">3 החלטות עכשיו</button>
               <button type="button" data-agent-prompt="בנה סל פעולות אופטימלי תחת התקציב ורצפת המזומן, והצג סדר ביצוע.">אופטימיזציית תקציב</button>
               <button type="button" data-agent-prompt="השווה תרחיש שמרני, מומלץ ואגרסיבי עד Q9 והסבר את הסיכונים.">השוואת תרחישים</button>
@@ -378,6 +379,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js?v=1.1.4" defer></script>
+  <script src="/static/app.js?v=1.1.5" defer></script>
 </body>
 </html>

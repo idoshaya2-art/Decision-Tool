@@ -426,6 +426,7 @@ def _intelligence(quarter: str) -> dict[str, Any]:
         "forecast_q9": forecast,
         "recommendations": recs,
         "decision_dependencies": decision_dependencies,
+        "latest_operations": latest_operations,
         "optimization_objective": {
             "primary": "מקסום ביצועי המשחק בכל נקודת זמן ועד Q9",
             "score_model": "50% ביצועי עבר + 50% פוטנציאל עתידי",
@@ -1415,6 +1416,8 @@ def agent_chat(payload: dict[str, Any]):
             return bundle["scorecard"]
         if name == "get_financial_position":
             return bundle["financial"]
+        if name == "get_liquidity_transfer_plan":
+            return bundle.get("financial", {}).get("liquidity_allocation", {})
         if name == "get_q9_forecast":
             return bundle["forecast_q9"]
         if name == "get_recommendations":

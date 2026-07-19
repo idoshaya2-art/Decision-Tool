@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import zipfile
 
-from analytics import financial_position
+from analytics import financial_position, liquidity_allocation_plan
 
 
 def _seed_q1_to_q3(client):
@@ -68,6 +68,8 @@ def test_q4_planning_uses_q1_to_q3_actuals(client):
     assert data["financial"]["consolidated"]["operating_cash_flow_sf"] is None
     assert data["financial"]["consolidated"]["cash_buffer_configured"] is False
     assert data["financial"]["areas"][0]["area"] == "US"
+    assert "liquidity_allocation" in data["financial"]
+    assert data["latest_operations"][0]["product"] == "Y"
     assert data["scorecard"]["past"]["values"]["net_profit_sf"] == 345_000
     assert data["forecast_q9"]["to_quarter"] == "Q9"
     assert data["recommendations"]
@@ -137,6 +139,51 @@ def test_consolidated_balance_uses_official_total_instead_of_summing_internal_co
     assert consolidated["equity_sf"] == 5_570_707
     assert consolidated["total_investment_sf"] == 8_358_651
     assert consolidated["current_assets_sf"] == 3_318_651
+
+
+def test_liquidity_plan_finds_cross_area_transfer_and_keeps_source_reserve():
+    plan = liquidity_allocation_plan(
+        [
+            {
+                "area": "Brazil",
+                "currency": "BRL",
+                "fx_to_sf": 0.5,
+                "ending_cash_sf": 1_047_452,
+                "current_liabilities_sf": 4_644,
+            },
+            {
+                "area": "Europe",
+                "currency": "EUR",
+                "fx_to_sf": 1.5,
+                "ending_cash_sf": 0,
+                "current_liabilities_sf": 1_715_697,
+                "ap_sf": 1_715_697,
+            },
+            {
+                "area": "Liechtenstein",
+                "currency": "CHF",
+                "fx_to_sf": 1,
+                "ending_cash_sf": 20_000,
+                "current_liabilities_sf": 424_170,
+                "debt_sf": 643_433,
+            },
+        ],
+        {
+            "ending_cash_sf": 1_067_452,
+            "current_liabilities_sf": 2_144_512,
+            "data_as_of": "Q3",
+        },
+    )
+    assert plan["status"] == "action_required"
+    assert plan["cash_concentration"]["area"] == "Brazil"
+    assert plan["cash_concentration"]["share"] > 0.98
+    assert [row["target_area"] for row in plan["transfers"]] == ["Europe", "Liechtenstein"]
+    europe = plan["transfers"][0]
+    assert europe["source_area"] == "Brazil"
+    assert europe["net_amount_sf"] == 428_924.25
+    assert europe["estimated_fx_fee_sf"] > 0
+    brazil = next(row for row in plan["areas"] if row["area"] == "Brazil")
+    assert plan["transfers"][-1]["source_cash_after_sf"] >= brazil["recommended_reserve_sf"]
 
 
 def test_file_import_review_commit_and_persistence(client):

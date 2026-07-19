@@ -13,7 +13,7 @@ import db
 
 BACKUP_FORMAT = "intopia-dss-cloud-backup"
 BACKUP_VERSION = 1
-APP_VERSION = "1.1.4-cumulative-quarter-picker"
+APP_VERSION = "1.1.5-guided-input-liquidity-agent"
 
 
 class BackupError(ValueError):

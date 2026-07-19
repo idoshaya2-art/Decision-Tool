@@ -7,6 +7,7 @@ from statistics import mean
 from typing import Any, Iterable
 
 from intopia_rules import (
+    AREA_CURRENCIES,
     BASELINE_FX_TO_SF,
     DECISION_ACTIONS,
     FX_COMMISSION,
@@ -108,6 +109,187 @@ def _embedded_balance(row: dict[str, Any]) -> dict[str, float]:
     except (TypeError, ValueError, json.JSONDecodeError):
         return {}
     return {str(key): num(value) for key, value in payload.items()}
+
+
+def liquidity_allocation_plan(
+    areas: list[dict[str, Any]],
+    consolidated: dict[str, Any],
+    *,
+    configured_cash_buffer_sf: float = 0.0,
+    reserve_rate: float = 0.25,
+    minimum_active_area_reserve_sf: float = 50_000.0,
+) -> dict[str, Any]:
+    """Build a deterministic, auditable cross-area liquidity recommendation.
+
+    The plan is a management policy, not an INTOPIA hard rule. It protects each
+    active area with a minimum reserve plus 25% of short-term obligations, then
+    moves only the surplus above that reserve. Cross-currency recommendations
+    gross up the source amount for the Data Log FX commission.
+    """
+    active_rows: list[dict[str, Any]] = []
+    for row in areas:
+        cash = num(row.get("ending_cash_sf"))
+        liabilities = max(num(row.get("current_liabilities_sf")), num(row.get("ap_sf")))
+        commitments = num(row.get("capex_commitments_sf"))
+        active = any(
+            abs(num(row.get(field))) > 0.000001
+            for field in (
+                "revenue_sf",
+                "net_profit_sf",
+                "ending_cash_sf",
+                "debt_sf",
+                "inventory_value_sf",
+                "current_assets_sf",
+                "current_liabilities_sf",
+                "ap_sf",
+                "capex_commitments_sf",
+            )
+        )
+        if not active:
+            continue
+        reserve = max(
+            minimum_active_area_reserve_sf,
+            commitments + reserve_rate * liabilities,
+        )
+        fx_to_sf = max(num(row.get("fx_to_sf"), 1.0), 0.000001)
+        area = str(row.get("area") or "")
+        currency_aliases = {"US": "USD", "USA": "USD", "EU": "EUR", "Europe": "EUR"}
+        active_rows.append(
+            {
+                "area": area,
+                "currency": str(
+                    row.get("currency")
+                    or AREA_CURRENCIES.get(area)
+                    or currency_aliases.get(area, "")
+                ),
+                "fx_to_sf": fx_to_sf,
+                "cash_sf": round(cash, 2),
+                "short_term_obligations_sf": round(liabilities, 2),
+                "commitments_sf": round(commitments, 2),
+                "recommended_reserve_sf": round(reserve, 2),
+                "funding_gap_sf": round(max(0.0, reserve - cash), 2),
+                "transferable_surplus_sf": round(max(0.0, cash - reserve), 2),
+            }
+        )
+
+    sources = sorted(
+        (dict(row) for row in active_rows if row["transferable_surplus_sf"] > 0),
+        key=lambda row: row["transferable_surplus_sf"],
+        reverse=True,
+    )
+    destinations = sorted(
+        (dict(row) for row in active_rows if row["funding_gap_sf"] > 0),
+        key=lambda row: (row["funding_gap_sf"], row["short_term_obligations_sf"]),
+        reverse=True,
+    )
+    transfers: list[dict[str, Any]] = []
+    for destination in destinations:
+        remaining_gap = float(destination["funding_gap_sf"])
+        for source in sources:
+            available = float(source["transferable_surplus_sf"])
+            if remaining_gap <= 0.01 or available <= 0.01:
+                continue
+            cross_currency = source["currency"] != destination["currency"]
+            commission_area_aliases = {"US": "USA", "EU": "Europe"}
+            commission_area = commission_area_aliases.get(source["area"], source["area"])
+            commission_rate = FX_COMMISSION.get(commission_area, 0.0) if cross_currency else 0.0
+            net_amount = min(available * max(1.0 - commission_rate, 0.0), remaining_gap)
+            gross_source_sf = net_amount / max(1.0 - commission_rate, 0.000001)
+            fee_sf = gross_source_sf - net_amount
+            source_after = float(source["cash_sf"]) - gross_source_sf
+            transfer = {
+                "priority": len(transfers) + 1,
+                "source_area": source["area"],
+                "source_currency": source["currency"],
+                "target_area": destination["area"],
+                "target_currency": destination["currency"],
+                "net_amount_sf": round(net_amount, 2),
+                "gross_source_amount_sf": round(gross_source_sf, 2),
+                "estimated_fx_fee_sf": round(fee_sf, 2),
+                "commission_rate": commission_rate,
+                "source_amount_lc": round(gross_source_sf / float(source["fx_to_sf"]), 2),
+                "target_amount_lc": round(net_amount / float(destination["fx_to_sf"]), 2),
+                "source_cash_after_sf": round(source_after, 2),
+                "target_cash_after_sf": round(float(destination["cash_sf"]) + net_amount, 2),
+                "covers_gap_pct": round(min(1.0, net_amount / max(remaining_gap, 0.000001)), 4),
+                "action_template": {
+                    "code": "A3-1",
+                    "type": "money_transfer",
+                    "area": source["area"],
+                    "target_area": destination["area"],
+                    "currency": source["currency"],
+                    "amount_sf": round(net_amount, 2),
+                    "cost_sf": round(fee_sf, 2),
+                },
+            }
+            transfers.append(transfer)
+            source["transferable_surplus_sf"] = round(max(0.0, available - gross_source_sf), 2)
+            source["cash_sf"] = round(source_after, 2)
+            destination["cash_sf"] = round(float(destination["cash_sf"]) + net_amount, 2)
+            remaining_gap = round(max(0.0, remaining_gap - net_amount), 2)
+
+    total_cash = num(consolidated.get("ending_cash_sf"))
+    top_cash_area = max(active_rows, key=lambda row: row["cash_sf"], default={})
+    concentration = (
+        num(top_cash_area.get("cash_sf")) / total_cash
+        if total_cash > 0 and top_cash_area
+        else None
+    )
+    policy_buffer = (
+        configured_cash_buffer_sf
+        if configured_cash_buffer_sf > 0
+        else max(
+            100_000.0,
+            reserve_rate * num(consolidated.get("current_liabilities_sf")),
+        )
+    )
+    uncovered_gap = round(
+        max(
+            0.0,
+            sum(row["funding_gap_sf"] for row in active_rows)
+            - sum(row["net_amount_sf"] for row in transfers),
+        ),
+        2,
+    )
+    return {
+        "status": "action_required" if transfers or uncovered_gap > 0 else "balanced",
+        "as_of": consolidated.get("data_as_of"),
+        "policy": {
+            "kind": "management_assumption",
+            "reserve_rate": reserve_rate,
+            "minimum_active_area_reserve_sf": minimum_active_area_reserve_sf,
+            "configured_cash_buffer_sf": round(max(0.0, configured_cash_buffer_sf), 2),
+            "recommended_consolidated_cash_buffer_sf": round(policy_buffer, 2),
+            "explanation_he": (
+                "רזרבה ניהולית: לפחות 50,000 SF לכל אזור פעיל ועוד 25% "
+                "מההתחייבויות השוטפות, בתוספת התחייבויות השקעה. זו הנחת עבודה "
+                "שקופה ולא חוק משחק."
+            ),
+        },
+        "cash_concentration": {
+            "area": top_cash_area.get("area"),
+            "currency": top_cash_area.get("currency"),
+            "share": round(concentration, 4) if concentration is not None else None,
+            "cash_sf": top_cash_area.get("cash_sf"),
+        },
+        "areas": active_rows,
+        "transfers": transfers,
+        "uncovered_gap_sf": uncovered_gap,
+        "confidence": "medium" if active_rows else "low",
+        "missing_inputs": [
+            item
+            for item, missing in (
+                ("רצפת מזומן מאושרת של הצוות", configured_cash_buffer_sf <= 0),
+                ("מועדי פירעון מדויקים של ספקים והתחייבויות", any(row["short_term_obligations_sf"] > 0 for row in active_rows)),
+            )
+            if missing
+        ],
+        "sources": [
+            "Approved area financial Actuals",
+            "Data Log v1 · DL-FX-COMMISSION",
+            "Management reserve policy (explicit assumption)",
+        ],
+    }
 
 
 def _financial_health(
@@ -367,6 +549,11 @@ def financial_position(
     }
     health = _financial_health(consolidated_values, cash_buffer_sf=max(0.0, cash_buffer_sf), consolidated=True)
     consolidated_values["health"] = health
+    liquidity_plan = liquidity_allocation_plan(
+        by_area,
+        {**consolidated_values, "data_as_of": data_as_of},
+        configured_cash_buffer_sf=max(0.0, cash_buffer_sf),
+    )
 
     requested_number = quarter_number(quarter)
     data_number = quarter_number(data_as_of) if data_as_of else 0
@@ -411,6 +598,7 @@ def financial_position(
         },
         "consolidated": consolidated_values,
         "health": health,
+        "liquidity_allocation": liquidity_plan,
         "areas": sorted(by_area, key=lambda row: str(row.get("area", ""))),
         "sources": (
             ([f"{data_as_of} consolidated finance"] if data_as_of else [])

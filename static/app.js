@@ -124,6 +124,201 @@ function configureActionForm() {
   if (definition.product) $("#actionForm [name=product]").value = definition.product;
   if ((definition.areas || []).length === 1) $("#actionForm [name=area]").value = definition.areas[0];
   $("#actionTiming").textContent = `${definition.category} · ${definition.timing}`;
+  refreshFieldAdvice();
+}
+
+function recommendedTransfer() {
+  const plan = state.intelligence?.financial?.liquidity_allocation || {};
+  const transfers = plan.transfers || [];
+  const form = $("#actionForm");
+  const source = form?.elements?.area?.value;
+  const target = form?.elements?.target_area?.value;
+  return transfers.find(row =>
+    (!source || row.source_area === source) &&
+    (!target || row.target_area === target)
+  ) || transfers[0] || null;
+}
+
+function latestOperationForInput(input) {
+  const rows = state.intelligence?.latest_operations || [];
+  const form = input?.form;
+  const area = form?.elements?.area?.value || $("#actionForm [name=area]")?.value;
+  const product = form?.elements?.product?.value || $("#actionForm [name=product]")?.value;
+  const model = form?.elements?.model?.value || $("#actionForm [name=model]")?.value;
+  return rows.find(row =>
+    (!area || row.area === area) &&
+    (!product || row.product === product) &&
+    (!model || row.model === model)
+  ) || rows.find(row => (!area || row.area === area) && (!product || row.product === product)) || rows[0] || null;
+}
+
+function fieldRecommendation(input) {
+  const formId = input.form?.id || "";
+  const name = input.name || input.id || "";
+  const transfer = recommendedTransfer();
+  const operation = latestOperationForInput(input);
+  const policy = state.intelligence?.financial?.liquidity_allocation?.policy || {};
+  const fallback = {
+    value: "לא לנחש",
+    reason: "הזינו רק ערך מדוח שאושר, מחקר שוק מאושר או תוצאת סימולציה. אם הנתון חסר, בקשו מה־AI רשימת מידע חסר.",
+    source: "כלל אמינות של המערכת",
+    confidence: "גבוהה",
+  };
+  const result = (value, rawValue, reason, source, confidence = "בינונית") => ({
+    value, rawValue, reason, source, confidence,
+  });
+
+  if (input.type === "file") {
+    return result(
+      "הקובץ המקורי המלא",
+      null,
+      "העדיפו Excel של תוצאות הרבעון. העלו Q1, Q2 ו־Q3 בנפרד; PDF מתאים לחוקים, אסטרטגיה ומחקרים.",
+      "תהליך הקליטה המאושר",
+      "גבוהה",
+    );
+  }
+
+  if (formId === "uploadForm" || formId === "agentUploadForm") {
+    if (name === "quarter") return result("זיהוי אוטומטי", "Setup", "המערכת קוראת את הרבעון מתוך הקובץ ומונעת שיוך שגוי.", "שם הקובץ ותוכן הדוח", "גבוהה");
+    if (name === "category") return result("פלט רבעוני", "פלט רבעוני", "לדוחות Q1–Q9. למסמכי חוקים או אסטרטגיה בחרו את הסוג המדויק.", "סוג המסמך", "גבוהה");
+    if (name === "notes") return result("מקור + מטרת הקובץ", null, "לדוגמה: “תוצאות רשמיות Q3, כולל MR24 ו־MR61”. כך קל יותר לאמת את החילוץ.", "נוהל תיעוד", "גבוהה");
+  }
+
+  if (formId === "areaFinanceForm") {
+    if (name === "fx_to_sf") return result("הערך המופיע בדוח הרבעוני", null, "אין להשתמש בשער אינטרנט או באומדן. זהו תיקון חריג ל־Actual בלבד.", "דוח רשמי — טבלת Currency", "גבוהה");
+    return result("הערך המדויק בדוח המאושר", null, "אין לאמוד נתון חשבונאי ידנית. תקנו רק שדה שהחילוץ סימן כשגוי.", "Income Statement / Balance Sheet של האזור", "גבוהה");
+  }
+
+  if (formId === "settingsForm") {
+    if (name === "cash_buffer_sf") {
+      const recommended = policy.recommended_consolidated_cash_buffer_sf;
+      return recommended
+        ? result(sf(recommended), recommended, "רזרבה ניהולית לפי התחייבויות שוטפות, אזורים פעילים והתחייבויות השקעה. אשרו אותה כמדיניות צוות.", "Actuals מאושרים + מדיניות רזרבה שקופה", "בינונית")
+        : result("לפחות 100,000 SF", 100000, "ערך פתיחה בלבד עד לקליטת מאזן והתחייבויות מלאים.", "הנחת ניהול זמנית", "נמוכה");
+    }
+    if (name === "min_rd_sf") return result("110,000 SF", 110000, "40,000 SF ל־X ועוד 70,000 SF ל־Y כאשר מממנים את שני מסלולי המו״פ.", "Data Log — ספי השקעת מו״פ", "גבוהה");
+    if (name === "company_name") return result("שם הקבוצה הרשמי", null, "השתמשו בשם אחד קבוע בכל הדוחות, הגיבויים והחלטות ההנהלה.", "הגדרת צוות", "גבוהה");
+    if (name === "startup_quarter") return result("Q4", "Q4", "Q1–Q3 הם בסיס הכיול; העבודה השוטפת מתחילה בהחלטות לקראת Q4.", "תהליך העבודה שאושר", "גבוהה");
+  }
+
+  if (formId === "actionForm") {
+    const code = formId && $("#actionForm [name=code]")?.value;
+    if (code === "A3-1" && transfer) {
+      const transferMap = {
+        area: [transfer.source_area, transfer.source_area, "זהו האזור בעל עודף מזומן לאחר שמירת הרזרבה.", "Actuals לפי אזור + מנוע נזילות"],
+        target_area: [transfer.target_area, transfer.target_area, "זהו האזור בעל פער המימון הדחוף ביותר.", "התחייבויות שוטפות, ספקים ומזומן לפי אזור"],
+        amount_sf: [sf(transfer.net_amount_sf), transfer.net_amount_sf, `הסכום נטו סוגר את פער הרזרבה. המקור ישלם ${sf(transfer.gross_source_amount_sf)} כולל עמלת מטבע.`, "מנוע נזילות דטרמיניסטי"],
+        currency: [transfer.source_currency, transfer.source_currency, `יש להזין את מטבע המקור; סכום המקור המקומי המשוער הוא ${fmt(transfer.source_amount_lc, 2)}.`, "Actuals + כללי מטבע"],
+        target_currency: [transfer.target_currency, transfer.target_currency, `היעד יקבל כ־${fmt(transfer.target_amount_lc, 2)} במטבע המקומי.`, "Actuals + שערי הדוח"],
+        cost_sf: [sf(transfer.estimated_fx_fee_sf), transfer.estimated_fx_fee_sf, `עמלת המרה משוערת ${pct(transfer.commission_rate)}. לאחר ההעברה יישארו במקור ${sf(transfer.source_cash_after_sf)}.`, "Data Log — עמלת המרה"],
+      };
+      if (transferMap[name]) return result(...transferMap[name], "בינונית");
+    }
+    if (name === "price_lc" && operation?.actual_price_lc != null) return result(fmt(operation.actual_price_lc, 2), operation.actual_price_lc, "זהו מחיר ה־Actual האחרון לאותו אזור/מוצר/דגם — נקודת מוצא לסימולציית תמחור, לא מחיר סופי אוטומטי.", `${operation.quarter} Actual`, "גבוהה");
+    if (name === "advertising_lc" && operation?.advertising_lc != null) return result(fmt(operation.advertising_lc, 2), operation.advertising_lc, "התחילו מרמת הפרסום האחרונה ובדקו תרחיש שינוי מול מכירות ומרווח.", `${operation.quarter} Actual`, "בינונית");
+    if (name === "units" && operation?.actual_sales != null) {
+      const units = Math.max(0, Number(operation.actual_sales) - Number(operation.ending_inventory || 0));
+      return result(fmt(units), units, `טיוטת בסיס: מכירות אחרונות ${fmt(operation.actual_sales)} פחות מלאי סיום ${fmt(operation.ending_inventory || 0)}. יש לאמת מול ביקוש, קיבולת וזמן אספקה.`, `${operation.quarter} Actual`, "בינונית");
+    }
+    if (name === "variable_cost_sf" && operation?.variable_cost_lc != null) {
+      const row = (state.intelligence?.financial?.areas || []).find(item => item.area === operation.area);
+      const value = Number(operation.variable_cost_lc) * Number(row?.fx_to_sf || 1);
+      return result(sf(value), value, "עלות הייצור האחרונה שהומרה ל־SF לפי שער הדוח.", `${operation.quarter} Actual`, "בינונית");
+    }
+    if (name === "grade" && operation?.grade != null) return result(String(operation.grade), operation.grade, "הרמה הטכנולוגית האחרונה שאושרה לאותו מוצר ואזור.", `${operation.quarter} Actual`, "גבוהה");
+    if (name === "x_grade") {
+      const xRow = (state.intelligence?.latest_operations || []).find(row => row.area === (operation?.area || $("#actionForm [name=area]")?.value) && row.product === "X");
+      if (xRow?.grade != null) return result(String(xRow.grade), xRow.grade, "רמת X זמינה באותו אזור; המערכת תבדוק תאימות לייצור Y.", `${xRow.quarter} Actual + חוק התאמת X–Y`, "גבוהה");
+    }
+    if (name === "plant_count") return result("0 עד להוכחת פער קיבולת", 0, "הקימו מפעל רק אם תחזית הביקוש והקיבולת המאושרת מצדיקות אותו גם בתרחיש Downside.", "קיבולת Actual + MR24 + בדיקת תקציב", "בינונית");
+    if (name === "study_id") return result("המחקר שמסיר את אי־הוודאות בהחלטה", null, "בחרו מחקר רק אם תוצאתו עשויה לשנות את הפעולה; שאלו את ה־AI “איזה MR ישנה את ההחלטה ולמה?”.", "קטלוג מחקרי שוק + Value of Information", "בינונית");
+  }
+
+  if (formId === "economicsForm") {
+    if (name === "price_lc" && operation?.actual_price_lc != null) return result(fmt(operation.actual_price_lc, 2), operation.actual_price_lc, "מחיר ה־Actual האחרון הוא נקודת הבסיס לסריקת המחירים.", `${operation.quarter} Actual`, "גבוהה");
+    if (name === "base_demand_units" && operation?.actual_sales != null) return result(fmt(operation.actual_sales), operation.actual_sales, "השתמשו במכירות ה־Actual האחרונות כביקוש בסיס, ואז בדקו רגישות.", `${operation.quarter} Actual`, "בינונית");
+    if (name === "manufacturing_cost_lc" && operation?.variable_cost_lc != null) return result(fmt(operation.variable_cost_lc, 2), operation.variable_cost_lc, "עלות הייצור המשתנה האחרונה שנקלטה.", `${operation.quarter} Actual`, "גבוהה");
+    if (name === "available_units" && operation) {
+      const value = Number(operation.ending_inventory || 0) + Number(operation.actual_production || 0);
+      return result(fmt(value), value, "מלאי סיום ועוד הייצור האחרון כנקודת בדיקה; התאימו לייצור המתוכנן בתרחיש.", `${operation.quarter} Actual`, "בינונית");
+    }
+    if (name === "elasticity") return result("1.0", 1, "הנחת ניטרלית בלבד. אל תשנו בלי לפחות שתי תצפיות מחיר–מכירות או מחקר שוק רלוונטי.", "הנחת תרחיש שקופה", "נמוכה");
+    if (name === "target_operating_margin") return result("20%", 0.2, "יעד ניהולי לבדיקת מחיר; יש להשוות לתרחישי 15% ו־25% ולמגבלת הביקוש.", "הנחת יעד פנימית", "נמוכה");
+    if (name === "fixed_cost_lc" || name === "variable_selling_cost_lc") return result("העלות המדויקת מהדוח", null, "אין להזין 0 אלא אם הדוח מאשר שאין עלות. ערך חסר עלול להציג מחיר מומלץ נמוך מדי.", "דוח תפעולי / Data Log", "גבוהה");
+  }
+
+  if (formId === "agentForm") return result("שאלה שמחייבת מספרים ומקורות", null, "לדוגמה: “בדוק כל אזור ומטבע; חשב מאיפה להעביר, לאן, כמה נטו וברוטו, עמלה, ויתרת מזומן אחרי ההעברה”.", "כללי הפעלת Decision Agent", "גבוהה");
+  if (name === "agentInstructions") return result("כל תשובה: מספרים, מקור, תלויות ו־Downside", null, "הוסיפו רצפת מזומן מאושרת, סדרי עדיפויות וקווים אדומים של הצוות.", "מדיניות הנהלה", "גבוהה");
+  if (formId === "decisionForm") return result("החלטה מדידה וניתנת לתחקור", null, "תעדו סכום, אזור, מוצר, רבעון, נימוק, תוצאה צפויה ובעל אחריות — לא כותרת כללית בלבד.", "Decision Log", "גבוהה");
+  if (formId === "restoreForm") return result("קובץ ZIP מלא מהמערכת", null, "שחזור מחליף או ממזג נתונים בהתאם לבחירה; הורידו גיבוי לפני הפעולה.", "Manifest של הגיבוי", "גבוהה");
+
+  return fallback;
+}
+
+function renderFieldAdvice(input, popover) {
+  if (!input || !popover) return;
+  const advice = fieldRecommendation(input);
+  const canApply = advice.rawValue !== undefined && advice.rawValue !== null && input.type !== "file";
+  popover.innerHTML = `
+    <strong>המלצה להזנה</strong>
+    <b>${esc(advice.value)}</b>
+    <p>${esc(advice.reason)}</p>
+    <small>מקור: ${esc(advice.source)} · ודאות: ${esc(advice.confidence)}</small>
+    ${canApply ? '<button type="button" class="field-advice-apply">מילוי ההמלצה</button>' : ""}
+  `;
+  const apply = $(".field-advice-apply", popover);
+  if (apply) apply.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    input.value = advice.rawValue;
+    input.dispatchEvent(new Event("input", {bubbles: true}));
+    input.dispatchEvent(new Event("change", {bubbles: true}));
+    input.closest("label")?.classList.remove("advice-open");
+  });
+}
+
+function refreshFieldAdvice() {
+  $$(".field-advice-button").forEach(button => {
+    const label = button.closest("label");
+    renderFieldAdvice(label?.querySelector("input:not([type=hidden]), select, textarea"), $(".field-advice-popover", label));
+  });
+}
+
+function installFieldAdvice() {
+  $$("form label").forEach(label => {
+    const input = label.querySelector("input:not([type=hidden]), select, textarea");
+    if (!input || label.querySelector(".field-advice-button")) return;
+    label.classList.add("has-field-advice");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "field-advice-button";
+    button.setAttribute("aria-label", "הצגת המלצה להזנה");
+    button.setAttribute("aria-expanded", "false");
+    button.textContent = "✦";
+    const popover = document.createElement("div");
+    popover.className = "field-advice-popover";
+    label.insertBefore(button, input);
+    label.insertBefore(popover, input);
+    const update = () => renderFieldAdvice(input, popover);
+    button.addEventListener("mouseenter", update);
+    button.addEventListener("focus", update);
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const open = !label.classList.contains("advice-open");
+      $$(".has-field-advice.advice-open").forEach(item => item.classList.remove("advice-open"));
+      label.classList.toggle("advice-open", open);
+      button.setAttribute("aria-expanded", String(open));
+      update();
+    });
+  });
+  document.addEventListener("click", event => {
+    if (!event.target.closest(".has-field-advice")) $$(".has-field-advice.advice-open").forEach(item => item.classList.remove("advice-open"));
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") $$(".has-field-advice.advice-open").forEach(item => item.classList.remove("advice-open"));
+  });
+  refreshFieldAdvice();
 }
 
 function openMenu() {
@@ -355,6 +550,7 @@ async function loadIntelligence() {
   fillSelect($("#financeAreaSelect"), options, options.includes(financeSelection) ? financeSelection : options[0]);
   renderDashboardFinance();
   renderFinancePage();
+  refreshFieldAdvice();
   const readiness = await api(`/api/dashboard/${state.quarter}`);
   $("#setupNotice").classList.toggle("hidden", readiness.onboarding?.ready);
 }
@@ -1254,6 +1450,7 @@ async function initialize() {
     const actionSelect = $("#actionForm [name=code]");
     actionSelect.innerHTML = (state.meta.decision_actions || []).map(item => `<option value="${esc(item.code)}">${esc(item.code)} · ${esc(item.title)} — ${esc(item.category)}</option>`).join("");
     configureActionForm();
+    installFieldAdvice();
     renderActionBasket();
     await Promise.all([loadCurrentQuarter(), loadAgentStatus(), loadRulebook()]);
   } catch (error) {
