@@ -8,7 +8,9 @@ from analytics import (
     build_execution_blueprint,
     financial_position,
     liquidity_allocation_plan,
+    review_decision_catalog,
 )
+from intopia_rules import DECISION_ACTIONS
 
 
 def _seed_q1_to_q3(client):
@@ -468,6 +470,90 @@ def test_intelligence_returns_execution_blueprint(client):
         }.issubset(row)
         for row in blueprint["rows"]
     )
+
+
+def test_intelligence_reviews_every_official_action_before_recommending(client):
+    _seed_q1_to_q3(client)
+    data = client.get("/api/intelligence/Q4").json()
+    review = data["action_review"]
+
+    assert review["evaluation_order"] == "full_catalog_before_recommendation_filter"
+    assert review["summary"]["evaluated_count"] == len(DECISION_ACTIONS) == 19
+    assert review["summary"]["catalog_count"] == len(DECISION_ACTIONS)
+    assert review["summary"]["coverage_pct"] == 100
+    assert {category["key"] for category in review["categories"]} == {
+        "strategy",
+        "finance",
+        "operations",
+        "marketing",
+    }
+    assert {action["code"] for action in review["actions"]} == {
+        action["code"] for action in DECISION_ACTIONS
+    }
+    assert all(action["rules_checked"] for action in review["actions"])
+    assert all(
+        action["status"]
+        in {
+            "recommended",
+            "required",
+            "blocked",
+            "missing_data",
+            "monitor",
+            "not_required",
+        }
+        for action in review["actions"]
+    )
+
+
+def test_decision_catalog_links_market_research_to_relevant_category():
+    review = review_decision_catalog(
+        "Q4",
+        {
+            "consolidated": {
+                "ending_cash_sf": 900_000,
+                "available_budget_sf": 500_000,
+                "debt_sf": 100_000,
+            },
+            "areas": [],
+            "liquidity_allocation": {"funding_gaps": [], "transfers": []},
+        },
+        [
+            {
+                "quarter": "Q3",
+                "area": "Europe",
+                "product": "Y",
+                "actual_price_lc": 900,
+                "actual_sales": 850,
+                "ending_inventory": 70,
+                "plant_capacity": 1_000,
+                "actual_production": 920,
+                "grade": 5,
+            }
+        ],
+        [
+            {
+                "quarter": "Q3",
+                "study_id": 28,
+                "source_label": "Q3 · MR28",
+                "headline": "מחירי המתחרים באירופה",
+            },
+            {
+                "quarter": "Q3",
+                "study_id": 61,
+                "source_label": "Q3 · MR61",
+                "headline": "עלות משתנה למוצר Y1",
+            },
+        ],
+        [],
+        {"rows": [], "summary": {}},
+    )
+
+    pricing = next(action for action in review["actions"] if action["code"] == "A1-2")
+    production = next(action for action in review["actions"] if action["code"] == "A2-4")
+    assert [row["study_id"] for row in pricing["research_used"]] == [28]
+    assert [row["study_id"] for row in production["research_used"]] == [61]
+    assert pricing["category"] == "marketing"
+    assert production["category"] == "operations"
 
 
 def test_strategy_optimization_rolls_from_latest_actual_to_q9(client):

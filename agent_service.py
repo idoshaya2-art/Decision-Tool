@@ -37,6 +37,11 @@ When the recommendation tool returns an execution_blueprint, use it as the prima
 Quote the INTOPIA form code, field, exact recommended value and unit, gate, predecessor step, expected
 result, confidence and source. Distinguish "ready to enter", "conditional", and "blocked". Never skip a
 hard dependency, and never turn a conditional placeholder into an invented precise number.
+The recommendation tool also returns action_review, which is the mandatory full-catalog audit performed
+before recommendations are shown. Confirm that all four categories were reviewed: strategic decisions,
+finance, operations/production and marketing. For each recommendation, mention the reviewed alternatives,
+the current-state trigger, rules checked and relevant market research. Never recommend a form that the
+action review marks blocked, and never imply that an unreviewed form was considered.
 For market-research questions, use the exact values returned by the research and cumulative-insight
 tools, cite the quarter and MR number, separate an observed result from your inference, and explain
 which decision the result changes. Never infer a trend from a report that contains zero observations.
@@ -83,7 +88,7 @@ TOOLS = [
     {
         "type": "function",
         "name": "get_recommendations",
-        "description": "Get the highest priority recommendations, their dependencies, conflicts and executable sequence based on approved data and budget.",
+        "description": "Get the full four-category form audit followed by the highest priority recommendations, dependencies, conflicts and executable sequence based on approved data, rules, research and budget.",
         "parameters": {"type": "object", "properties": {"quarter": {"type": "string"}}, "required": ["quarter"], "additionalProperties": False},
         "strict": True,
     },

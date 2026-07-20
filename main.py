@@ -29,6 +29,7 @@ from analytics import (
     financial_position,
     q9_forecast,
     recommendations,
+    review_decision_catalog,
     simulate_portfolio,
 )
 from backup_service import APP_VERSION, BackupError, create_backup, restore_backup
@@ -382,6 +383,14 @@ def _intelligence(quarter: str) -> dict[str, Any]:
         decision_dependencies,
         recommendations=recs,
     )
+    action_review = review_decision_catalog(
+        quarter,
+        financial,
+        operations,
+        research,
+        recs,
+        execution_blueprint,
+    )
     dependency_nodes = {
         str(node.get("id")): node
         for node in decision_dependencies.get("nodes", [])
@@ -460,6 +469,7 @@ def _intelligence(quarter: str) -> dict[str, Any]:
         "scorecard": score,
         "forecast_q9": forecast,
         "recommendations": recs,
+        "action_review": action_review,
         "decision_dependencies": decision_dependencies,
         "execution_blueprint": execution_blueprint,
         "latest_operations": latest_operations,
@@ -1458,10 +1468,13 @@ def agent_chat(payload: dict[str, Any]):
             return bundle["forecast_q9"]
         if name == "get_recommendations":
             return {
+                "action_review": bundle.get("action_review", {}),
                 "recommendations": bundle["recommendations"],
                 "execution_blueprint": bundle.get("execution_blueprint", {}),
                 "decision_dependencies": bundle.get("decision_dependencies", {}),
-                "sources": [f"{selected} recommendations and executable decision blueprint"],
+                "sources": [
+                    f"{selected} full decision-form review, recommendations and executable decision blueprint"
+                ],
             }
         if name == "get_relevant_research":
             return relevant_research(selected, str(arguments.get("domain") or ""))

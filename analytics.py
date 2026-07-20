@@ -17,7 +17,11 @@ from intopia_rules import (
     compatible_x_units,
     decision_action,
 )
-from rulebook import evaluate_portfolio as evaluate_rulebook_portfolio
+from rulebook import (
+    RULEBOOK_VERSION,
+    evaluate_action as evaluate_rulebook_action,
+    evaluate_portfolio as evaluate_rulebook_portfolio,
+)
 
 
 QUARTER_NUMBERS = {f"Q{i}": i for i in range(1, 10)}
@@ -907,6 +911,509 @@ def recommendations(
             item.setdefault("evidence", []).append("approved strategy profile")
     result.sort(key=lambda item: (-int(item["priority"]), item["title"]))
     return result[:5]
+
+
+DECISION_CATEGORY_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "key": "strategy",
+        "label": "החלטות אסטרטגיות",
+        "label_en": "Strategic Decisions",
+        "catalog_category": "אסטרטגיה",
+        "order": 1,
+    },
+    {
+        "key": "finance",
+        "label": "מימון",
+        "label_en": "Financial",
+        "catalog_category": "מימון",
+        "order": 2,
+    },
+    {
+        "key": "operations",
+        "label": "ייצור ותפעול",
+        "label_en": "Operation & Production",
+        "catalog_category": "ייצור ותפעול",
+        "order": 3,
+    },
+    {
+        "key": "marketing",
+        "label": "שיווק",
+        "label_en": "Marketing",
+        "catalog_category": "שיווק",
+        "order": 4,
+    },
+)
+
+_CATEGORY_BY_CATALOG = {
+    str(item["catalog_category"]): item
+    for item in DECISION_CATEGORY_SPECS
+}
+
+_RECURRING_DECISION_CODES = {
+    "A1-1",
+    "A1-2",
+    "A2-3",
+    "A2-4",
+    "H1-1",
+}
+
+_RESEARCH_BY_ACTION: dict[str, set[int]] = {
+    "A1-1": {17, 28, *range(31, 50)},
+    "A1-2": {17, 28, *range(31, 50)},
+    "A1-3": {11, 81},
+    "A2-1": {10, 18, 19, 24, 40},
+    "A2-3": {18, 19, 23, 24, *range(51, 60)},
+    "A2-4": {18, 19, 23, 24, *range(61, 70)},
+    "A3-1": {74, 79},
+    "A3-2": {74, 79},
+    "A3-3": {74, 79},
+    "A4": {19, 23, 24},
+    "H1-1": {12, 13, 14, 17, 21, 22},
+    "H1-2": set(range(1, 82)),
+    "H2": {20, 74, 79},
+    "H4": {74, 79},
+    "H5": {17, 21, 22, *range(31, 70)},
+    "H6": {17, 23, 28, 74},
+    "W1": {74, 79},
+    "W2": {10, 18, 24, 40, 74},
+    "W3": {74, 79},
+}
+
+
+def _action_current_state(
+    action: dict[str, Any],
+    latest_operations: list[dict[str, Any]],
+    financial: dict[str, Any],
+    research_results: list[dict[str, Any]],
+) -> str:
+    code = str(action.get("code") or "")
+    product = str(action.get("product") or "")
+    rows = [
+        row
+        for row in latest_operations
+        if not product or str(row.get("product") or "") == product
+    ]
+    consolidated = financial.get("consolidated", {})
+    areas = financial.get("areas", [])
+
+    if code in {"A1-1", "A1-2"}:
+        priced = [row for row in rows if num(row.get("actual_price_lc")) > 0]
+        sales = sum(num(row.get("actual_sales")) for row in rows)
+        inventory = sum(num(row.get("ending_inventory")) for row in rows)
+        if not priced:
+            return f"לא נקלטו מחירי Actual למוצר {product}; לא ניתן לכייל מחיר ופרסום."
+        return (
+            f"{len(priced)} פלחים מתומחרים; מכירות {sales:,.0f} יחידות ומלאי סופי "
+            f"{inventory:,.0f} יחידות במוצר {product}."
+        )
+    if code == "A1-3":
+        office_values = [
+            num(row.get("sales_offices"))
+            for row in latest_operations
+            if row.get("sales_offices") not in (None, "")
+        ]
+        return (
+            f"נקלטו {len(office_values)} תצפיות של משרדי מכירות."
+            if office_values
+            else "מספר משרדי המכירות והעלות האופטימלית לא זוהו ב-Actuals."
+        )
+    if code == "H6":
+        return "לא זוהתה עסקת מכירה תעשייתית חתומה; נבחנת כחלופת מלאי/אספקה בלבד."
+    if code == "A2-1":
+        capacity = sum(num(row.get("plant_capacity")) for row in latest_operations)
+        production = sum(num(row.get("actual_production")) for row in latest_operations)
+        utilization = production / capacity if capacity else 0
+        return (
+            f"קיבולת כוללת {capacity:,.0f}; ייצור {production:,.0f}; ניצולת "
+            f"{utilization:.1%}."
+            if capacity
+            else "לא נקלטה קיבולת מפעלים; אי אפשר להצדיק הרחבה."
+        )
+    if code in {"A2-3", "A2-4"}:
+        capacity = sum(num(row.get("plant_capacity")) for row in rows)
+        production = sum(num(row.get("actual_production")) for row in rows)
+        inventory = sum(num(row.get("ending_inventory")) for row in rows)
+        return (
+            f"מוצר {product}: ייצור {production:,.0f}, קיבולת {capacity:,.0f}, "
+            f"מלאי {inventory:,.0f}."
+            if rows
+            else f"לא נקלטו נתוני ייצור למוצר {product}."
+        )
+    if code == "A4":
+        x_inventory = sum(
+            num(row.get("ending_inventory"))
+            for row in latest_operations
+            if str(row.get("product") or "") == "X"
+        )
+        y_production = sum(
+            num(row.get("actual_production"))
+            for row in latest_operations
+            if str(row.get("product") or "") == "Y"
+        )
+        return f"מלאי X זמין {x_inventory:,.0f}; ייצור Y אחרון {y_production:,.0f}."
+    if code in {"A3-1", "A3-2", "A3-3", "W3"}:
+        gaps = financial.get("liquidity_allocation", {}).get("funding_gaps", [])
+        transfers = financial.get("liquidity_allocation", {}).get("transfers", [])
+        return (
+            f"מזומן מאוחד {num(consolidated.get('ending_cash_sf')):,.0f} SF; "
+            f"{len(gaps)} פערי נזילות ו-{len(transfers)} העברות מחושבות."
+        )
+    if code in {"H2", "H4", "W1"}:
+        return (
+            f"תקציב החלטות {num(consolidated.get('available_budget_sf')):,.0f} SF; "
+            f"חוב {num(consolidated.get('debt_sf')):,.0f} SF."
+        )
+    if code == "H1-1":
+        grades = [
+            int(num(row.get("grade")))
+            for row in latest_operations
+            if row.get("grade") not in (None, "")
+        ]
+        return (
+            f"רמה טכנולוגית מרבית שנקלטה: {max(grades)}; נדרשת בחינת רציפות עד Q9."
+            if grades
+            else "לא נקלטו רמות טכנולוגיות המאפשרות לכייל השקעת מו״פ."
+        )
+    if code == "H1-2":
+        studies = sorted(
+            {
+                int(num(row.get("study_id")))
+                for row in research_results
+                if num(row.get("study_id")) > 0
+            }
+        )
+        return (
+            f"נקלטו {len(studies)} מחקרים מאושרים: "
+            + ", ".join(f"MR{value}" for value in studies[:8])
+            + ("…" if len(studies) > 8 else "")
+            if studies
+            else "לא נקלטו מחקרי שוק מאושרים."
+        )
+    if code == "H5":
+        grades = [
+            int(num(row.get("grade")))
+            for row in latest_operations
+            if row.get("grade") not in (None, "")
+        ]
+        return (
+            f"רמה מרבית בבעלות/מכירה: {max(grades)}; אין רישיון שותף מאושר בנתונים."
+            if grades
+            else "לא נקלטו רמות טכנולוגיות או הצעת רישיון."
+        )
+    if code == "W2":
+        plants = sum(num(row.get("plants")) for row in latest_operations)
+        return f"נרשמו {plants:,.0f} מפעלים; לא זוהתה הצעת רכישה או מכירה חתומה."
+    if areas:
+        return f"נבדקו נתונים מאוחדים ו-{len(areas)} אזורי פעילות."
+    return "אין די נתונים ספציפיים; הפעולה נבדקה ברמת הקטלוג והחוקים בלבד."
+
+
+def review_decision_catalog(
+    quarter: str,
+    financial: dict[str, Any],
+    operations: list[dict[str, Any]],
+    research_results: list[dict[str, Any]],
+    candidate_recommendations: list[dict[str, Any]],
+    execution_blueprint: dict[str, Any],
+) -> dict[str, Any]:
+    """Audit every official form before exposing category recommendations.
+
+    Candidate recommendations are treated as signals only. Every catalog form
+    receives a deterministic state/rule/research assessment, so the UI can
+    show which alternatives were considered and why they were not selected.
+    """
+
+    latest_quarter = max(
+        (str(row.get("quarter") or "") for row in through_quarter(operations, quarter)),
+        key=quarter_number,
+        default="",
+    )
+    latest_operations = [
+        row
+        for row in through_quarter(operations, quarter)
+        if str(row.get("quarter") or "") == latest_quarter
+    ]
+    blueprint_rows = list(execution_blueprint.get("rows") or [])
+    research_by_id = {
+        int(num(row.get("study_id"))): row
+        for row in research_results
+        if num(row.get("study_id")) > 0
+    }
+    recommendation_by_code: dict[str, list[dict[str, Any]]] = {}
+    for recommendation in candidate_recommendations:
+        code = str((recommendation.get("action_template") or {}).get("code") or "")
+        if code:
+            recommendation_by_code.setdefault(code, []).append(recommendation)
+    blueprint_by_code: dict[str, list[dict[str, Any]]] = {}
+    for row in blueprint_rows:
+        code = str(row.get("form_code") or "")
+        if code:
+            blueprint_by_code.setdefault(code, []).append(row)
+
+    reviewed: list[dict[str, Any]] = []
+    for catalog in DECISION_ACTIONS:
+        code = str(catalog["code"])
+        category = _CATEGORY_BY_CATALOG.get(
+            str(catalog.get("category") or ""),
+            DECISION_CATEGORY_SPECS[-1],
+        )
+        recommendations_for_form = recommendation_by_code.get(code, [])
+        blueprint_for_form = blueprint_by_code.get(code, [])
+        concrete_action = {}
+        if blueprint_for_form:
+            concrete_action = dict(blueprint_for_form[0].get("action") or {})
+        elif recommendations_for_form:
+            concrete_action = dict(
+                recommendations_for_form[0].get("action_template") or {}
+            )
+        concrete_action = {
+            "code": code,
+            "type": catalog.get("type"),
+            **({"product": catalog.get("product")} if catalog.get("product") else {}),
+            **concrete_action,
+        }
+        checks = evaluate_rulebook_action(
+            concrete_action,
+            quarter=quarter,
+            operations=latest_operations,
+            strict=False,
+        )
+        blocking_checks = [
+            check
+            for check in checks
+            if check.get("blocking") and check.get("status") == "fail"
+        ]
+        relevant_research = [
+            research_by_id[study_id]
+            for study_id in sorted(_RESEARCH_BY_ACTION.get(code, set()))
+            if study_id in research_by_id
+        ]
+        current_state = _action_current_state(
+            catalog,
+            latest_operations,
+            financial,
+            research_results,
+        )
+        missing_inputs: list[str] = []
+        if code in {"A1-1", "A1-2"} and not any(
+            str(row.get("product") or "") == str(catalog.get("product") or "")
+            and num(row.get("actual_price_lc")) > 0
+            for row in latest_operations
+        ):
+            missing_inputs.append("מחיר ומכירות Actual לפי פלח")
+        if code == "A1-3" and not any(
+            row.get("sales_offices") not in (None, "")
+            for row in latest_operations
+        ):
+            missing_inputs.append("מספר ועלות משרדי המכירות")
+        if code in {"A2-1", "A2-3", "A2-4"} and not any(
+            num(row.get("plant_capacity")) > 0
+            for row in latest_operations
+            if not catalog.get("product")
+            or row.get("product") == catalog.get("product")
+        ):
+            missing_inputs.append("קיבולת מפעלים מאושרת")
+        if code in {"H4", "H5", "H6", "W1", "W2"} and not recommendations_for_form:
+            missing_inputs.append("הסכם או הצעה קונקרטית מצד שותף")
+
+        if blocking_checks:
+            status = "blocked"
+            status_label = "חסום לפי חוק"
+            reason = blocking_checks[0].get("message") or "זוהתה הפרת חוק חוסמת."
+        elif blueprint_for_form or recommendations_for_form:
+            statuses = {str(row.get("status") or "") for row in blueprint_for_form}
+            if "blocked" in statuses:
+                status = "blocked"
+                status_label = "חסום עד תיקון"
+            elif "conditional" in statuses:
+                status = "recommended"
+                status_label = "מומלץ בכפוף לתנאי"
+            else:
+                status = "recommended"
+                status_label = "מומלץ לביצוע"
+            reason = (
+                recommendations_for_form[0].get("rationale")
+                if recommendations_for_form
+                else blueprint_for_form[0].get("gate")
+            ) or "הפעולה נכללה בתכנית הביצוע לאחר בדיקת מצב, חוק ותקציב."
+        elif code in _RECURRING_DECISION_CODES and not missing_inputs:
+            status = "required"
+            status_label = "נדרשת החלטה רבעונית"
+            reason = (
+                "זהו טופס מחזורי שיש לקבוע בכל רבעון; לא זוהה טריגר לשינוי חריג, "
+                "אך יש לאשר את הערך מול התקציב והתחזית."
+            )
+        elif missing_inputs:
+            status = "missing_data"
+            status_label = "חסר מידע"
+            reason = "אין בסיס מספק להמלצה מספרית: " + ", ".join(missing_inputs) + "."
+        elif relevant_research:
+            status = "monitor"
+            status_label = "למעקב"
+            reason = "נמצא מחקר רלוונטי, אך התוצאה אינה יוצרת כרגע טריגר לפעולה."
+        else:
+            status = "not_required"
+            status_label = "לא נדרש כרגע"
+            reason = "לא זוהו טריגר, התחייבות או יתרון כלכלי המצדיקים את הפעולה ברבעון זה."
+
+        next_step = ""
+        if blueprint_for_form:
+            next_step = " | ".join(
+                str(row.get("input_instruction") or row.get("recommended_value") or "")
+                for row in blueprint_for_form[:2]
+                if row.get("input_instruction") or row.get("recommended_value")
+            )
+        elif recommendations_for_form:
+            next_step = str(recommendations_for_form[0].get("title") or "")
+        elif status == "required":
+            next_step = f"לאשר את ערכי {code} לאחר בדיקת המחיר, הכמות והתקציב."
+        elif missing_inputs:
+            next_step = "להשלים: " + ", ".join(missing_inputs) + "."
+        else:
+            next_step = "אין הזנה נדרשת; לבדוק מחדש לאחר Actual או מחקר חדש."
+
+        research_evidence = [
+            {
+                "study_id": row.get("study_id"),
+                "source_label": row.get("source_label")
+                or f"{row.get('quarter', '')} · MR{row.get('study_id', '')}",
+                "headline": row.get("headline") or row.get("key_result") or "",
+                "recommendation": row.get("recommendation") or "",
+            }
+            for row in relevant_research[:4]
+        ]
+        rule_evidence = [
+            {
+                "rule_id": f"FORM-{code}",
+                "status": "pass",
+                "message": str(catalog.get("timing") or ""),
+                "source": f"ממשק INTOPIA · טופס {code}",
+            },
+            *[
+                {
+                    "rule_id": check.get("rule_id"),
+                    "status": check.get("status"),
+                    "message": check.get("message"),
+                    "source": (check.get("citation") or {}).get("source", ""),
+                }
+                for check in checks
+            ],
+        ]
+        reviewed.append(
+            {
+                "code": code,
+                "type": catalog.get("type"),
+                "title": catalog.get("title"),
+                "category": category["key"],
+                "category_label": category["label"],
+                "category_label_en": category["label_en"],
+                "category_order": category["order"],
+                "status": status,
+                "status_label": status_label,
+                "priority": max(
+                    [
+                        int(row.get("priority") or 0)
+                        for row in recommendations_for_form
+                    ]
+                    or [0]
+                ),
+                "reason": reason,
+                "current_state": current_state,
+                "next_step": next_step,
+                "timing": catalog.get("timing"),
+                "areas": catalog.get("areas") or [],
+                "product": catalog.get("product"),
+                "rules_checked": rule_evidence,
+                "research_used": research_evidence,
+                "missing_information": missing_inputs,
+                "recommendation_ids": [
+                    row.get("id")
+                    for row in recommendations_for_form
+                ],
+                "execution_steps": [
+                    row.get("order")
+                    for row in blueprint_for_form
+                    if row.get("order") is not None
+                ],
+                "rulebook_version": RULEBOOK_VERSION,
+            }
+        )
+
+    reviewed.sort(
+        key=lambda row: (
+            int(row["category_order"]),
+            {
+                "recommended": 0,
+                "required": 1,
+                "blocked": 2,
+                "missing_data": 3,
+                "monitor": 4,
+                "not_required": 5,
+            }.get(str(row["status"]), 9),
+            -int(row["priority"]),
+            str(row["code"]),
+        )
+    )
+    categories = []
+    for spec in DECISION_CATEGORY_SPECS:
+        actions = [
+            row
+            for row in reviewed
+            if row["category"] == spec["key"]
+        ]
+        categories.append(
+            {
+                **spec,
+                "actions": actions,
+                "counts": {
+                    status: sum(
+                        1
+                        for row in actions
+                        if row["status"] == status
+                    )
+                    for status in (
+                        "recommended",
+                        "required",
+                        "blocked",
+                        "missing_data",
+                        "monitor",
+                        "not_required",
+                    )
+                },
+            }
+        )
+    return {
+        "quarter": quarter,
+        "actual_as_of": latest_quarter or None,
+        "rulebook_version": RULEBOOK_VERSION,
+        "evaluation_order": "full_catalog_before_recommendation_filter",
+        "summary": {
+            "evaluated_count": len(reviewed),
+            "catalog_count": len(DECISION_ACTIONS),
+            "coverage_pct": round(
+                100 * len(reviewed) / max(1, len(DECISION_ACTIONS)),
+                1,
+            ),
+            "recommended_count": sum(
+                1 for row in reviewed if row["status"] == "recommended"
+            ),
+            "required_count": sum(
+                1 for row in reviewed if row["status"] == "required"
+            ),
+            "blocked_count": sum(
+                1 for row in reviewed if row["status"] == "blocked"
+            ),
+            "missing_data_count": sum(
+                1 for row in reviewed if row["status"] == "missing_data"
+            ),
+            "headline": (
+                f"נבדקו כל {len(reviewed)} טפסי ההחלטה מול מצב החברה, "
+                "ה-Rulebook ומחקרי השוק לפני סינון ההמלצות."
+            ),
+        },
+        "categories": categories,
+        "actions": reviewed,
+    }
 
 
 @dataclass

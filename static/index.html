@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>EMBA TAU Simulation</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=1.1.6">
+  <link rel="stylesheet" href="/static/styles.css?v=1.2.0">
 </head>
 <body>
   <header class="topbar">
@@ -50,7 +50,7 @@
       <button class="nav-item secondary-nav" data-section="rules">מרכז החוקים</button>
       <button class="nav-item secondary-nav" data-section="guide">מדריך שימוש</button>
       <button class="nav-item secondary-nav" data-section="backup">גיבוי ושחזור</button>
-      <div class="nav-foot">AI Decision OS v1.1<br><span>Supabase · Rulebook · OpenAI</span></div>
+      <div class="nav-foot">AI Decision OS v1.2<br><span>Supabase · Rulebook · OpenAI</span></div>
     </aside>
 
     <main>
@@ -66,6 +66,18 @@
           <div><span>50% פוטנציאל עתידי</span><strong id="futureScore">—</strong><small id="futureCoverage">כיסוי נתונים —</small></div>
           <div><span>תקציב פנוי להחלטות</span><strong id="availableBudget">—</strong><small>לאחר התחייבויות ורזרבה</small></div>
         </div>
+        <article class="panel action-review-panel" dir="rtl">
+          <div class="panel-head">
+            <div>
+              <span class="panel-kicker">FULL DECISION AUDIT</span>
+              <h2>לפני שממליצים — בודקים את כל אפשרויות הפעולה</h2>
+              <p id="actionReviewHeadline">סורק את כל טפסי INTOPIA מול המצב, החוקים ומחקרי השוק…</p>
+            </div>
+            <div id="actionReviewCounts" class="action-review-counts"></div>
+          </div>
+          <div id="actionReviewCategories" class="decision-category-board"></div>
+          <div id="actionReviewEmpty" class="empty-copy hidden">לא ניתן להשלים את הבדיקה עד לקליטת Actuals מאושרים.</div>
+        </article>
         <article class="panel execution-blueprint-panel">
           <div class="panel-head">
             <div>
@@ -96,15 +108,15 @@
         </article>
         <div class="dashboard-grid">
           <article class="panel decision-panel">
-            <div class="panel-head"><div><span class="panel-kicker">FOCUS</span><h2>החלטות שדורשות דיון עכשיו</h2></div><span class="soft-pill">עד 5</span></div>
+            <div class="panel-head"><div><span class="panel-kicker">CATEGORY RECOMMENDATIONS</span><h2>המלצות שעברו את הבדיקה — לפי תחום</h2></div><span class="soft-pill">עד 5 קריטיות</span></div>
             <div id="decisionDependencySummary" class="dependency-summary"></div>
-            <div id="recommendationsList" class="recommendation-list"></div>
+            <div id="recommendationsList" class="recommendation-groups"></div>
           </article>
           <article class="panel">
             <div class="panel-head"><div><span class="panel-kicker">FINANCIAL HEALTH</span><h2>מצב כספי</h2></div><div class="panel-controls"><span id="dashboardHealthBadge" class="health-badge unknown">ממתין לנתונים</span><select id="dashboardAreaSelect" aria-label="בחירת מדינה"></select></div></div>
             <p id="dashboardHealthHeadline" class="health-headline"></p>
             <div id="dashboardFinance" class="metric-list"></div>
-            <button class="text-link" type="button" data-go="finance">לפירוט הכספי המלא ←</button>
+            <button class="text-link rtl-next-link" type="button" data-go="finance">לפירוט הכספי המלא</button>
           </article>
         </div>
         <div class="dashboard-grid lower-grid">
@@ -407,6 +419,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js?v=1.1.6" defer></script>
+  <script src="/static/app.js?v=1.2.0" defer></script>
 </body>
 </html>

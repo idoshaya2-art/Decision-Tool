@@ -428,6 +428,79 @@ function renderScoreAndForecast() {
   $("#scenarioBudgetLabel").textContent = `תקציב ${sf(financial.available_budget_sf)}`;
 }
 
+const DECISION_CATEGORY_ORDER = [
+  {key: "strategy", label: "החלטות אסטרטגיות", labelEn: "STRATEGIC DECISIONS"},
+  {key: "finance", label: "מימון", labelEn: "FINANCIAL"},
+  {key: "operations", label: "ייצור ותפעול", labelEn: "OPERATION & PRODUCTION"},
+  {key: "marketing", label: "שיווק", labelEn: "MARKETING"},
+];
+
+function actionStatusIcon(status) {
+  return {
+    recommended: "✓",
+    required: "!",
+    blocked: "×",
+    missing_data: "?",
+    monitor: "◉",
+    not_required: "—",
+  }[status] || "•";
+}
+
+function renderActionReview() {
+  const review = state.intelligence?.action_review || {};
+  const summary = review.summary || {};
+  const categories = review.categories || [];
+  const empty = $("#actionReviewEmpty");
+  $("#actionReviewHeadline").textContent = summary.headline || "ממתין לנתונים מאושרים לצורך בדיקת כל הפעולות.";
+  $("#actionReviewCounts").innerHTML = [
+    ["coverage", "כיסוי", summary.coverage_pct == null ? "—" : `${fmt(summary.coverage_pct)}%`],
+    ["recommended", "מומלץ", summary.recommended_count || 0],
+    ["required", "נדרש", summary.required_count || 0],
+    ["blocked", "חסום", summary.blocked_count || 0],
+    ["missing_data", "חסר מידע", summary.missing_data_count || 0],
+  ].map(([status, label, value]) => `<span class="action-review-count ${status}"><b>${value}</b>${label}</span>`).join("");
+  empty.classList.toggle("hidden", categories.length > 0);
+  $("#actionReviewCategories").innerHTML = categories.map(category => {
+    const actions = category.actions || [];
+    const counts = category.counts || {};
+    return `<section class="decision-category category-${esc(category.key)}">
+      <header class="decision-category-head">
+        <div><span>${esc(category.label_en || "")}</span><h3>${esc(category.label)}</h3></div>
+        <b>${fmt(actions.length)}</b>
+      </header>
+      <div class="decision-category-summary">
+        <span class="recommended">${fmt(counts.recommended || 0)} מומלצות</span>
+        <span class="required">${fmt(counts.required || 0)} מחזוריות</span>
+        <span class="attention">${fmt((counts.blocked || 0) + (counts.missing_data || 0))} דורשות טיפול</span>
+      </div>
+      <div class="decision-action-cards">${actions.map(action => {
+        const research = action.research_used || [];
+        const rules = action.rules_checked || [];
+        const recommended = action.status === "recommended";
+        return `<details class="decision-action-card ${esc(action.status)}" ${recommended ? "open" : ""}>
+          <summary>
+            <span class="action-status-icon" aria-hidden="true">${actionStatusIcon(action.status)}</span>
+            <span class="action-card-copy"><bdi class="action-code" dir="ltr">${esc(action.code)}</bdi><strong>${esc(action.title)}</strong></span>
+            <span class="action-status-label">${esc(action.status_label)}</span>
+          </summary>
+          <div class="action-card-detail">
+            <div><b>מצב קיים</b><p>${esc(action.current_state || "—")}</p></div>
+            <div><b>מסקנת הבדיקה</b><p>${esc(action.reason || "—")}</p></div>
+            <div><b>הפעולה הבאה</b><p>${esc(action.next_step || "—")}</p></div>
+            <div class="action-evidence-row">
+              <span><b>חוקים</b> ${fmt(rules.length)}</span>
+              <span><b>מחקרים רלוונטיים</b> ${fmt(research.length)}</span>
+              <span><b>Rulebook</b> <bdi dir="ltr">${esc(action.rulebook_version || "—")}</bdi></span>
+            </div>
+            ${research.length ? `<div class="action-research-evidence">${research.map(item => `<span title="${esc(item.headline || "")}"><bdi dir="ltr">MR${esc(item.study_id)}</bdi> · ${esc(item.source_label || "")}</span>`).join("")}</div>` : '<small class="no-evidence">לא נמצא מחקר מאושר שמשנה החלטה זו.</small>'}
+            <p class="action-timing"><b>תזמון:</b> ${esc(action.timing || "—")}</p>
+          </div>
+        </details>`;
+      }).join("")}</div>
+    </section>`;
+  }).join("");
+}
+
 function renderExecutionBlueprint() {
   const blueprint = state.intelligence?.execution_blueprint || {};
   const rows = blueprint.rows || [];
@@ -458,7 +531,7 @@ function renderExecutionBlueprint() {
     const canSimulate = row.action && !["strategy_review", "cash_protection"].includes(row.action_type);
     return `<tr class="execution-row ${esc(row.status || "conditional")}">
       <td><span class="execution-order">${fmt(row.order || index + 1)}</span><small>${esc(row.phase || "")}</small></td>
-      <td><strong>${esc(row.area || "—")}${row.target_area ? ` → ${esc(row.target_area)}` : ""}</strong><span class="form-code">${esc(row.form_code || "—")}</span></td>
+      <td><strong class="execution-route"><span>${esc(row.area || "—")}</span>${row.target_area ? `<span class="route-arrow" aria-label="אל">←</span><span>${esc(row.target_area)}</span>` : ""}</strong><bdi class="form-code" dir="ltr">${esc(row.form_code || "—")}</bdi></td>
       <td><strong>${esc(row.field_name || row.action_name || "—")}</strong><small>${esc(row.action_name || "")}</small></td>
       <td><b class="execution-value">${esc(row.recommended_value || "נדרש אישור")}</b><span class="execution-status ${esc(row.status || "conditional")}">${esc(row.status_label || "")} · ${esc(row.decision_type || "")}</span></td>
       <td><div class="dependency-stack">${dependencyHtml}${coordinationHtml}${unlocksHtml}</div><p>${esc(row.gate || "")}</p></td>
@@ -470,8 +543,10 @@ function renderExecutionBlueprint() {
 }
 
 function renderRecommendations() {
+  renderActionReview();
   renderExecutionBlueprint();
   const rows = state.intelligence?.recommendations || [];
+  const review = state.intelligence?.action_review || {};
   const graph = state.intelligence?.decision_dependencies || {};
   const sequence = graph.recommended_sequence || [];
   const graphSummary = graph.summary || {};
@@ -482,10 +557,20 @@ function renderRecommendations() {
       <span class="soft-pill">${fmt(graphSummary.dependency_count || 0)} תלויות</span>
     </div>
     <p>${esc(graphSummary.message || "הפעולות נבדקות יחד מול התקציב, התזמון ויעד Q9.")}</p>
-    <div class="dependency-sequence">${sequence.map(item => `<span><b>${fmt(item.step)}</b>${esc(item.title)}</span>`).join("")}</div>
+    <div class="dependency-sequence" dir="rtl">${sequence.map(item => `<span><b>${fmt(item.step)}</b>${esc(item.title)}</span>`).join("")}</div>
     <small>עלות משולבת ${sf(budget.planned_cost_sf)} · תקציב אפקטיבי ${sf(budget.effective_budget_sf)} · יתרה ${sf(budget.remaining_after_plan_sf)}</small>
   ` : "";
-  $("#recommendationsList").innerHTML = rows.length ? rows.map((row, index) => {
+  const reviewedActions = review.actions || [];
+  const recommendationCategory = row => {
+    const linked = reviewedActions.find(action => (action.recommendation_ids || []).includes(row.id));
+    if (linked) return linked.category;
+    const domain = String(row.domain || "");
+    if (["מימון", "פיננסים"].includes(domain)) return "finance";
+    if (["ייצור", "תפעול"].some(token => domain.includes(token))) return "operations";
+    if (["תמחור", "שיווק"].some(token => domain.includes(token))) return "marketing";
+    return "strategy";
+  };
+  const recommendationCard = (row, index) => {
     const impact = row.economic_impact || {};
     const ai = row.ai_recommendation || {};
     const dependencies = row.dependencies || {};
@@ -496,7 +581,7 @@ function renderRecommendations() {
       ...(dependencies.gaps || []).map(item => `<li class="dependency-warning"><b>חסר:</b> ${esc(item.missing)} — ${esc(item.reason)}</li>`),
       ...(dependencies.conflicts || []).map(item => `<li class="dependency-warning"><b>התנגשות:</b> ${esc(item.reason)}</li>`),
     ];
-    return `<article class="recommendation">
+    return `<article class="recommendation" dir="rtl">
       <span class="priority">${index + 1}</span>
       <div class="recommendation-main">
         <div class="recommendation-meta"><span class="soft-pill">${esc(row.domain)}</span><span class="risk-label">סיכון ${esc(row.risk || "—")}</span><span class="health-badge ${esc(ai.level || "unknown")}">${esc(ai.verdict || "ממתין לניתוח")}</span></div>
@@ -522,6 +607,14 @@ function renderRecommendations() {
         <button class="text-link" type="button" data-log-recommendation="${index}">שמור כהחלטה</button>
       </div>
     </article>`;
+  };
+  const indexedRows = rows.map((row, index) => ({row, index}));
+  $("#recommendationsList").innerHTML = rows.length ? DECISION_CATEGORY_ORDER.map(category => {
+    const matches = indexedRows.filter(item => recommendationCategory(item.row) === category.key);
+    return `<section class="recommendation-category-group category-${category.key}">
+      <header><div><span>${esc(category.labelEn)}</span><h3>${esc(category.label)}</h3></div><b>${fmt(matches.length)}</b></header>
+      <div class="recommendation-list">${matches.length ? matches.map(item => recommendationCard(item.row, item.index)).join("") : '<div class="category-clear">לא נמצאה פעולה מומלצת בתחום זה לאחר הבדיקה.</div>'}</div>
+    </section>`;
   }).join("") : '<div class="empty-copy">אין עדיין מספיק נתונים ליצירת המלצות.</div>';
 }
 
@@ -944,8 +1037,8 @@ function renderInsights() {
   const trends = state.insights?.trends || {};
   const cards = [...(trends.cards || []), ...(trends.cross_research || [])];
   $("#insightCards").innerHTML = cards.length ? cards.map(item => `<article class="insight-card ${esc(item.direction || "flat")}"><span class="trend-arrow">${trendIcon(item.direction)}</span><div><small>${esc(item.quarter || `עד ${state.quarter}`)} · ודאות ${esc(item.confidence || "גבוהה")}</small><h2>${esc(item.title)}</h2><p>${esc(item.evidence)}</p><strong>${esc(item.recommendation)}</strong></div></article>`).join("") : '<div class="empty-copy">נדרשים לפחות שני רבעונים מאושרים לניתוח מגמות.</div>';
-  $("#pricingInsights").innerHTML = (trends.pricing || []).length ? trends.pricing.map(item => `<div class="compact-row insight-row"><div><strong>${esc(item.segment)}</strong><small>${esc(item.from_quarter)}→${esc(item.to_quarter)} · מחיר ${signedSf(item.price_delta).replace(" SF", "")} · מכירות ${item.sales_delta > 0 ? "+" : ""}${fmt(item.sales_delta)} · מלאי ${item.inventory_delta > 0 ? "+" : ""}${fmt(item.inventory_delta)}</small><p>${esc(item.signal)}. ${esc(item.recommendation)}</p></div></div>`).join("") : '<div class="empty-copy">אין עדיין מספיק תצפיות מחיר ומכירות.</div>';
-  $("#competitorInsights").innerHTML = (trends.competitors || []).length ? trends.competitors.map(item => `<div class="compact-row insight-row"><span class="trend-mini ${esc(item.direction)}">${trendIcon(item.direction)}</span><div><strong>${esc(item.segment)}</strong><small>חציון מתחרים: ${fmt(item.median_from)} → ${fmt(item.median_to)} · ${item.observations} תצפיות</small></div></div>`).join("") : '<div class="empty-copy">לא קיימות עדיין מספיק תוצאות MR28 להשוואה בין רבעונים.</div>';
+  $("#pricingInsights").innerHTML = (trends.pricing || []).length ? trends.pricing.map(item => `<div class="compact-row insight-row"><div><strong>${esc(item.segment)}</strong><small><bdi dir="ltr">${esc(item.from_quarter)} → ${esc(item.to_quarter)}</bdi> · מחיר ${signedSf(item.price_delta).replace(" SF", "")} · מכירות ${item.sales_delta > 0 ? "+" : ""}${fmt(item.sales_delta)} · מלאי ${item.inventory_delta > 0 ? "+" : ""}${fmt(item.inventory_delta)}</small><p>${esc(item.signal)}. ${esc(item.recommendation)}</p></div></div>`).join("") : '<div class="empty-copy">אין עדיין מספיק תצפיות מחיר ומכירות.</div>';
+  $("#competitorInsights").innerHTML = (trends.competitors || []).length ? trends.competitors.map(item => `<div class="compact-row insight-row"><span class="trend-mini ${esc(item.direction)}">${trendIcon(item.direction)}</span><div><strong>${esc(item.segment)}</strong><small>חציון מתחרים: <bdi dir="ltr">${fmt(item.median_from)} → ${fmt(item.median_to)}</bdi> · ${item.observations} תצפיות</small></div></div>`).join("") : '<div class="empty-copy">לא קיימות עדיין מספיק תוצאות MR28 להשוואה בין רבעונים.</div>';
   renderResearchInsights();
   $("#dashboardChanges").innerHTML = cards.length ? cards.slice(0, 4).map(item => `<div class="compact-row"><span class="trend-mini ${esc(item.direction || "flat")}">${trendIcon(item.direction)}</span><div><strong>${esc(item.title)}</strong><small>${esc(item.evidence)}</small></div></div>`).join("") : '<div class="empty-copy">לא קיימות עדיין מספיק תוצאות מאושרות להשוואה.</div>';
 }
@@ -958,7 +1051,7 @@ async function loadInsights() {
 async function loadResearch() {
   const domain = $("#researchDomainSelect").value || "";
   const data = await api(`/api/research/relevant/${state.quarter}?domain=${encodeURIComponent(domain)}`);
-  $("#researchResults").innerHTML = data.results.length ? data.results.map(row => `<article class="research-card ${row.relevant ? "relevant" : ""}"><div class="research-meta"><span class="soft-pill">${esc(row.quarter)}</span><span class="soft-pill">ודאות ${esc(row.confidence)}</span>${row.area ? `<span class="soft-pill">${esc(row.area)}</span>` : ""}</div><h2>${esc(row.title)}</h2><p>${esc(row.key_result || "טרם הוזן סיכום מובנה למחקר.")}</p><button class="text-link" type="button" data-ask-research="${esc(row.title)}">שאל את ה-Agent על המחקר ←</button></article>`).join("") : '<div class="empty-copy">לא נקלטו מחקרי שוק מאושרים.</div>';
+  $("#researchResults").innerHTML = data.results.length ? data.results.map(row => `<article class="research-card ${row.relevant ? "relevant" : ""}"><div class="research-meta"><span class="soft-pill">${esc(row.quarter)}</span><span class="soft-pill">ודאות ${esc(row.confidence)}</span>${row.area ? `<span class="soft-pill">${esc(row.area)}</span>` : ""}</div><h2>${esc(row.title)}</h2><p>${esc(row.key_result || "טרם הוזן סיכום מובנה למחקר.")}</p><button class="text-link rtl-next-link" type="button" data-ask-research="${esc(row.title)}">שאל את ה-Agent על המחקר</button></article>`).join("") : '<div class="empty-copy">לא נקלטו מחקרי שוק מאושרים.</div>';
   $("#researchCatalog").innerHTML = data.catalog.map(row => `<div class="compact-row"><div><strong>MR${esc(row.study_id)} · ${esc(row.name)}</strong><small>${esc(row.description)}</small></div><span class="soft-pill">${row.cost_k_sf == null ? "עלות לא ידועה" : `${fmt(row.cost_k_sf)}K SF`}</span></div>`).join("");
 }
 
@@ -1015,7 +1108,7 @@ function renderSimulation(result) {
       <div class="simulation-notes dependency-results">
         <strong>תלויות ותיאום בין החלטות</strong>
         <ul>
-          ${dependencyEdges.map(item => `<li><b>${esc(nodeNames[item.from] || item.from)} ← ${esc(nodeNames[item.to] || item.to)}</b>: ${esc(item.reason)}</li>`).join("")}
+          ${dependencyEdges.map(item => `<li><b>קודם: ${esc(nodeNames[item.from] || item.from)}</b> · אחר כך: <b>${esc(nodeNames[item.to] || item.to)}</b> — ${esc(item.reason)}</li>`).join("")}
           ${dependencyGaps.map(item => `<li class="dependency-warning"><b>תנאי חסר:</b> ${esc(item.missing)} — ${esc(item.reason)}</li>`).join("")}
           ${dependencyConflicts.map(item => `<li class="dependency-warning"><b>התנגשות:</b> ${esc(item.reason)}</li>`).join("")}
         </ul>
