@@ -1,4 +1,5 @@
 __pycache__/
+pytest-cache-files-*/
 *.py[cod]
 .pytest_cache/
 .testdeps*/

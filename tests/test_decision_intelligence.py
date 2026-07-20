@@ -9,8 +9,51 @@ from analytics import (
     financial_position,
     liquidity_allocation_plan,
     review_decision_catalog,
+    simulate_portfolio,
 )
 from intopia_rules import DECISION_ACTIONS
+
+
+def test_decision_pack_blocks_outflow_above_source_area_cash():
+    result = simulate_portfolio(
+        "Q4",
+        {
+            "decision_pack": True,
+            "budget_sf": 1_000_000,
+            "cash_buffer_sf": 0,
+            "actions": [
+                {
+                    "code": "A3-1",
+                    "type": "money_transfer",
+                    "area": "Europe",
+                    "target_area": "Liechtenstein",
+                    "amount_sf": 900_000,
+                }
+            ],
+        },
+        {
+            "consolidated": {
+                "ending_cash_sf": 1_200_000,
+                "available_budget_sf": 1_000_000,
+            },
+            "areas": [
+                {
+                    "area": "Europe",
+                    "ending_cash_sf": 100_000,
+                    "capex_commitments_sf": 0,
+                }
+            ],
+        },
+        {"score": {"base": 50}},
+        [],
+    )
+
+    assert result["feasible"] is False
+    assert result["rule_validation"]["readiness"]["status"] == "blocked"
+    assert any(
+        row["rule_id"] == "AREA-LIQUIDITY-SOURCE"
+        for row in result["rule_validation"]["violations"]
+    )
 
 
 def _seed_q1_to_q3(client):

@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>EMBA TAU Simulation</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=1.2.0">
+  <link rel="stylesheet" href="/static/styles.css?v=1.5.0">
 </head>
 <body>
   <header class="topbar">
@@ -21,16 +21,6 @@
       <span id="cloudState" class="status-chip"><i></i> בודק ענן…</span>
     </div>
   </header>
-
-  <nav class="primary-tabs" aria-label="מסכי עבודה מרכזיים">
-    <button class="primary-tab active" data-section="dashboard" type="button"><span>01</span>חדר החלטות</button>
-    <button class="primary-tab" data-section="strategyopt" type="button"><span>02</span>אופטימיזציית אסטרטגיה</button>
-    <button class="primary-tab" data-section="agent" type="button"><span>03</span>צ׳אט AI</button>
-    <button class="primary-tab" data-section="finance" type="button"><span>04</span>מצב פיננסי</button>
-    <button class="primary-tab" data-section="reports" type="button"><span>05</span>תובנות ומגמות</button>
-    <button class="primary-tab" data-section="decisionlog" type="button"><span>06</span>לוג החלטות</button>
-    <button class="primary-tab" data-section="settings" type="button"><span>07</span>הגדרות</button>
-  </nav>
 
   <div id="menuOverlay" class="menu-overlay" hidden></div>
   <div id="appShell" class="app-shell">
@@ -50,7 +40,7 @@
       <button class="nav-item secondary-nav" data-section="rules">מרכז החוקים</button>
       <button class="nav-item secondary-nav" data-section="guide">מדריך שימוש</button>
       <button class="nav-item secondary-nav" data-section="backup">גיבוי ושחזור</button>
-      <div class="nav-foot">AI Decision OS v1.2<br><span>Supabase · Rulebook · OpenAI</span></div>
+      <div class="nav-foot">AI Decision OS v1.5<br><span>Supabase · Rulebook · Evidence Gate · OpenAI</span></div>
     </aside>
 
     <main>
@@ -64,48 +54,11 @@
           <div><span>תחזית Q9</span><strong id="q9Score">—</strong><small id="q9Confidence">ממתין לנתונים</small></div>
           <div><span>50% ביצועי עבר</span><strong id="pastScore">—</strong><small id="pastCoverage">כיסוי נתונים —</small></div>
           <div><span>50% פוטנציאל עתידי</span><strong id="futureScore">—</strong><small id="futureCoverage">כיסוי נתונים —</small></div>
-          <div><span>תקציב פנוי להחלטות</span><strong id="availableBudget">—</strong><small>לאחר התחייבויות ורזרבה</small></div>
+          <div><span>נזילות לסוף התקופה</span><strong id="liquidityPosition">—</strong><small id="liquidityNote">ממתין לנתונים</small></div>
+          <div><span>חסמים לפני החלטה</span><strong id="decisionBlockers">—</strong><small id="decisionBlockersNote">בדיקת חוקים ומידע חסר</small></div>
         </div>
-        <article class="panel action-review-panel" dir="rtl">
-          <div class="panel-head">
-            <div>
-              <span class="panel-kicker">FULL DECISION AUDIT</span>
-              <h2>לפני שממליצים — בודקים את כל אפשרויות הפעולה</h2>
-              <p id="actionReviewHeadline">סורק את כל טפסי INTOPIA מול המצב, החוקים ומחקרי השוק…</p>
-            </div>
-            <div id="actionReviewCounts" class="action-review-counts"></div>
-          </div>
-          <div id="actionReviewCategories" class="decision-category-board"></div>
-          <div id="actionReviewEmpty" class="empty-copy hidden">לא ניתן להשלים את הבדיקה עד לקליטת Actuals מאושרים.</div>
-        </article>
-        <article class="panel execution-blueprint-panel">
-          <div class="panel-head">
-            <div>
-              <span class="panel-kicker">EXECUTION BLUEPRINT</span>
-              <h2>תכנית הביצוע המדויקת לרבעון</h2>
-              <p id="executionBlueprintHeadline">מכין את סדר הפעולות, הערכים והתלויות…</p>
-            </div>
-            <div id="executionBlueprintCounts" class="execution-blueprint-counts"></div>
-          </div>
-          <div class="execution-table-wrap">
-            <table class="execution-table">
-              <thead>
-                <tr>
-                  <th>סדר</th>
-                  <th>אזור וטופס</th>
-                  <th>שדה / פעולה</th>
-                  <th>מה להזין</th>
-                  <th>תנאי ותלות</th>
-                  <th>תוצאה צפויה</th>
-                  <th>מקור וביטחון</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="executionBlueprintRows"></tbody>
-            </table>
-          </div>
-          <div id="executionBlueprintEmpty" class="empty-copy hidden">אין עדיין תכנית מספרית. אשרו את Q1–Q3 ואת האסטרטגיה כדי לייצר אותה.</div>
-        </article>
+        <div id="decisionGateBanner" class="decision-gate unknown" role="status" aria-live="polite"></div>
+        <div id="evidenceGateSummary" class="evidence-gate-summary unknown" role="status" aria-live="polite"></div>
         <div class="dashboard-grid">
           <article class="panel decision-panel">
             <div class="panel-head"><div><span class="panel-kicker">CATEGORY RECOMMENDATIONS</span><h2>המלצות שעברו את הבדיקה — לפי תחום</h2></div><span class="soft-pill">עד 5 קריטיות</span></div>
@@ -119,6 +72,54 @@
             <button class="text-link rtl-next-link" type="button" data-go="finance">לפירוט הכספי המלא</button>
           </article>
         </div>
+        <details class="analyst-disclosure">
+          <summary>
+            <div><span class="panel-kicker">AUDIT & EXECUTION</span><strong>בדיקות עומק ותכנית הזנה ל־INTOPIA</strong><small>19 פעולות, חוקים, מחקרים, ערכים ותלויות</small></div>
+            <span class="disclosure-action">פתיחת שכבת האנליסט</span>
+          </summary>
+          <div class="analyst-disclosure-body">
+            <article class="panel action-review-panel" dir="rtl">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-kicker">FULL DECISION AUDIT</span>
+                  <h2>בדיקת כל אפשרויות הפעולה</h2>
+                  <p id="actionReviewHeadline">סורק את כל טפסי INTOPIA מול המצב, החוקים ומחקרי השוק…</p>
+                </div>
+                <div id="actionReviewCounts" class="action-review-counts"></div>
+              </div>
+              <div id="actionReviewCategories" class="decision-category-board"></div>
+              <div id="actionReviewEmpty" class="empty-copy hidden">לא ניתן להשלים את הבדיקה עד לקליטת Actuals מאושרים.</div>
+            </article>
+            <article class="panel execution-blueprint-panel">
+              <div class="panel-head">
+                <div>
+                  <span class="panel-kicker">EXECUTION BLUEPRINT</span>
+                  <h2>תכנית הביצוע המדויקת לרבעון</h2>
+                  <p id="executionBlueprintHeadline">מכין את סדר הפעולות, הערכים והתלויות…</p>
+                </div>
+                <div id="executionBlueprintCounts" class="execution-blueprint-counts"></div>
+              </div>
+              <div class="execution-table-wrap">
+                <table class="execution-table">
+                  <thead>
+                    <tr>
+                      <th>סדר</th>
+                      <th>אזור וטופס</th>
+                      <th>שדה / פעולה</th>
+                      <th>מה להזין</th>
+                      <th>תנאי ותלות</th>
+                      <th>תוצאה צפויה</th>
+                      <th>מקור וביטחון</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="executionBlueprintRows"></tbody>
+                </table>
+              </div>
+              <div id="executionBlueprintEmpty" class="empty-copy hidden">אין עדיין תכנית מספרית. אשרו את Q1–Q3 ואת האסטרטגיה כדי לייצר אותה.</div>
+            </article>
+          </div>
+        </details>
         <div class="dashboard-grid lower-grid">
           <article class="panel"><div class="panel-head"><div><span class="panel-kicker">TRAJECTORY</span><h2>מסלול ל־Q9</h2></div></div><div id="forecastSummary" class="forecast-grid"></div></article>
           <article class="panel"><div class="panel-head"><div><span class="panel-kicker">EVIDENCE</span><h2>מחקרים רלוונטיים</h2></div><button class="text-link" type="button" data-go="reports">לתובנות ולתוצאות המחקר</button></div><div id="dashboardResearch" class="compact-list"></div></article>
@@ -167,6 +168,15 @@
         <article class="panel">
           <div class="panel-head"><div><span class="panel-kicker">SCENARIO CHOICE</span><h2>ארבע דרכי פעולה עד Q9</h2><p>כל חלופה מוצגת עם טווח, תקציב, סיכון ויכולת ביצוע.</p></div></div>
           <div id="strategyScenarioGrid" class="strategy-scenario-grid"></div>
+        </article>
+
+        <article class="panel q9-optimizer-panel">
+          <div class="panel-head"><div><span class="panel-kicker">INTEGRATED Q9 OPTIMIZER</span><h2>סל ההחלטות המנצח תחת התקציב</h2><p>המערכת בוחנת יחד שיווק, ייצור, מימון ואסטרטגיה — כולל תלויות, תזמון וטווח Downside.</p></div><span id="q9OptimizerRobustness" class="status-chip">מחשב…</span></div>
+          <div id="q9OptimizerSummary" class="q9-strip compact"></div>
+          <div class="two-columns strategy-detail-grid">
+            <div><h3>סדר ביצוע מחייב</h3><div id="q9OptimizerActions" class="strategy-gates"></div></div>
+            <div><h3>רגישות למשקלי הציון</h3><div id="q9OptimizerSensitivity" class="compact-list"></div></div>
+          </div>
         </article>
 
         <div class="two-columns strategy-detail-grid">
@@ -235,7 +245,17 @@
 
       <section id="section-reports" class="page">
         <div class="page-head"><div><p class="eyebrow">CUMULATIVE INTELLIGENCE</p><h1>תובנות ומגמות</h1><p>מה השתנה בין הרבעונים, מה למדנו על תמחור ומתחרים, ומה תוצאות מחקרי השוק אומרות עבורנו.</p></div><div class="segmented"><button id="quarterReportButton" type="button">הרבעון הנבחר</button><button id="cumulativeReportButton" class="active" type="button">מצטבר עד הרבעון</button></div></div>
-        <div id="insightCards" class="insight-card-grid"></div>
+          <div id="insightCards" class="insight-card-grid"></div>
+          <article class="panel learning-ledger-panel">
+            <div class="panel-head">
+              <div><span class="panel-kicker">FORECAST → ACTUAL</span><h2>מה חזינו, מה קרה ומה למדנו</h2><p>התחזית ננעלת לפני הרבעון. לאחר אישור ה־Actuals המערכת מודדת את הסטייה ומציעה כיול — לעולם לא משנה את המודל ללא אישור הצוות.</p></div>
+              <button id="freezeForecastButton" class="button secondary" type="button">נעילת תחזית לרבעון הנבחר</button>
+            </div>
+            <div id="learningSummary" class="kpi-grid compact"></div>
+            <div id="learningEvaluations" class="learning-evaluation-list"></div>
+            <div class="panel-head learning-proposal-head"><div><span class="panel-kicker">HUMAN-IN-THE-LOOP</span><h3>הצעות כיול שממתינות להחלטה</h3></div></div>
+            <div id="calibrationProposals" class="calibration-proposal-list"></div>
+          </article>
         <article class="panel"><div id="reportHeader" class="report-title"></div><div id="reportKpis" class="kpi-grid compact"></div><div id="reportNarrative" class="report-grid"></div></article>
         <article class="panel"><div class="panel-head"><div><span class="panel-kicker">TREND</span><h2>מגמה רבעונית</h2></div></div><div class="table-wrap"><table><thead><tr><th>רבעון</th><th>הכנסות</th><th>רווח נקי</th><th>מזומן</th><th>מכירות</th><th>מלאי</th><th>טכנולוגיה</th></tr></thead><tbody id="trendBody"></tbody></table></div></article>
         <div class="two-columns insight-columns">
@@ -250,6 +270,11 @@
 
       <section id="section-research" class="page">
         <div class="page-head"><div><p class="eyebrow">MARKET INTELLIGENCE</p><h1>מרכז מחקרי שוק</h1><p>מה כל מחקר אומר, לאיזו החלטה הוא רלוונטי ומה עדיין חסר.</p></div><select id="researchDomainSelect"><option value="">כל ההחלטות</option><option>תמחור</option><option>ייצור</option><option>מו״פ</option><option>שיווק</option><option>קיבולת</option></select></div>
+        <div class="two-columns insight-columns">
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">VALUE OF INFORMATION</span><h2>3 המחקרים שכדאי לשקול עכשיו</h2><p>דירוג לפי החלטות פתוחות, עלות ואפשרות אמיתית לשנות החלטה.</p></div><button id="refreshMarketIntelligence" class="button secondary" type="button">רענון ניתוח</button></div><div id="voiRecommendations" class="compact-list"></div></article>
+          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">CALIBRATION GATE</span><h2>מה אפשר ללמוד מהמגמות</h2><p>המערכת מסרבת לכייל אלסטיות כשאין מספיק תצפיות.</p></div></div><div id="researchCalibrations" class="compact-list"></div></article>
+        </div>
+        <article class="panel"><div class="panel-head"><div><span class="panel-kicker">KNOWLEDGE BOUNDARY</span><h2>מה עדיין אי אפשר להסיק</h2></div><span id="researchCoverage" class="soft-pill">מיפוי —</span></div><div id="researchUnknowns" class="compact-list"></div></article>
         <div id="researchResults" class="research-grid"></div>
         <details class="panel"><summary>קטלוג מחקרים זמין</summary><div id="researchCatalog" class="catalog-list"></div></details>
       </section>
@@ -340,6 +365,19 @@
       <section id="section-decisionlog" class="page">
         <div class="page-head"><div><p class="eyebrow">DECISION MEMORY</p><h1>לוג החלטות</h1><p>מה המליצה המערכת, מה החלטנו, מה ציפינו שיקרה ומה התרחש בפועל.</p></div><div class="log-filters"><select id="decisionLogQuarter"><option value="">כל הרבעונים</option></select><select id="decisionLogStatus"><option value="">כל הסטטוסים</option><option>טיוטה</option><option>אושר</option><option>בוצע</option><option>נסגר</option></select></div></div>
         <div id="decisionLogSummary" class="q9-strip log-summary"></div>
+        <article class="panel governance-panel">
+          <div class="panel-head"><div><span class="panel-kicker">GROUP DECISION GOVERNANCE</span><h2>ישיבת אישור סל ההחלטות</h2><p>חמש נקודות מבט, שער בקרה אחד ותיעוד מלא של הסכמה והסתייגויות.</p></div><div class="action-row"><span id="governanceStatus" class="status-chip">אין ישיבה פעילה</span><button id="createGovernanceSession" class="button secondary" type="button">פתיחת ישיבה מהסל המומלץ</button></div></div>
+          <div id="governanceMachineGate" class="governance-checks"></div>
+          <div id="governanceRoles" class="governance-roles"></div>
+          <form id="governanceVoteForm" class="governance-vote-form hidden">
+            <label>תפקיד<select name="role"><option value="finance">כספים ונזילות</option><option value="marketing">שיווק ותמחור</option><option value="operations">תפעול ושרשרת אספקה</option><option value="strategy">אסטרטגיה ו־Q9</option><option value="chair">מוביל/ת הישיבה</option></select></label>
+            <label>שם המשתתף<input name="voter_name" required></label>
+            <label>עמדה<select name="vote"><option value="approve">מאשר/ת</option><option value="reject">מבקש/ת שינוי</option><option value="abstain">נמנע/ת</option></select></label>
+            <label class="grow">נימוק / הסתייגות<input name="rationale" placeholder="חובה בבקשת שינוי או הימנעות"></label>
+            <button class="button secondary" type="submit">שמירת עמדה</button>
+          </form>
+          <div class="governance-footer"><p id="governancePolicy">האישור מתעד החלטה קבוצתית בלבד ואינו שולח דבר ל־INTOPIA.</p><button id="approveGovernanceSession" class="button" type="button" disabled>אישור ונעילת הישיבה</button></div>
+        </article>
         <article class="panel">
           <div class="panel-head"><div><span class="panel-kicker">TIMELINE</span><h2>החלטות עד כה</h2></div><button id="newDecisionButton" class="button secondary" type="button">הוספת החלטה ידנית</button></div>
           <div id="decisionLogList" class="decision-log-list"></div>
@@ -419,6 +457,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js?v=1.2.0" defer></script>
+  <script src="/static/app.js?v=1.9.0" defer></script>
 </body>
 </html>

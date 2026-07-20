@@ -13,7 +13,7 @@ import db
 
 BACKUP_FORMAT = "intopia-dss-cloud-backup"
 BACKUP_VERSION = 1
-APP_VERSION = "1.2.0-category-decision-review"
+APP_VERSION = "1.9.0-group-governance"
 
 
 class BackupError(ValueError):
@@ -193,9 +193,17 @@ def restore_backup(content: bytes, *, mode: str, max_uncompressed_bytes: int) ->
         "document_chunks",
         "ai_runs",
         "forecasts",
+        "forecast_evaluations",
+        "calibration_proposals",
         "decision_packs",
         "recommendation_evidence",
+        "evidence_gate_runs",
         "optimization_runs",
+        "digital_twin_snapshots",
+        "digital_twin_runs",
+        "market_intelligence_runs",
+        "decision_sessions",
+        "decision_votes",
         "audit_log",
     ]
     counts: dict[str, int] = {}

@@ -1,4 +1,4 @@
-# EMBA TAU Simulation AI Decision OS v1.0 Architecture
+# EMBA TAU Simulation AI Decision OS v1.6 Architecture
 
 ```text
 Team browser
@@ -7,6 +7,7 @@ Team browser
 Render FastAPI service
     ├── file extraction and review workflow
     ├── deterministic scoring, finance, pricing and simulation engines
+    ├── quarterly Digital Twin with immutable Actual baseline
     ├── optional OpenAI Decision Agent with read-only tools
     ├── backup / restore validation
     ├── server-only Supabase secret
@@ -36,12 +37,22 @@ Render FastAPI service
 
 - `import_service.py` — structured extraction and review payloads.
 - `analytics.py` — financial position, scorecard, Q9 forecast, recommendations and scenario portfolio simulation.
+- `digital_twin.py` — immutable baseline snapshots and quarter-by-quarter state transitions through Q9.
 - `agent_service.py` — optional OpenAI Responses API orchestration with read-only function tools.
 - `backup_service.py` — complete portable ZIP with integrity checks.
 - `db.py` / `cloud.py` — repository layer over Supabase Data and Storage APIs.
 - `rulebook.py` — Rulebook versioned, deterministic rule checks, report validation and portfolio enforcement.
 - `agent_service.py` — Responses API orchestration with server-side tools and auditable AI runs.
 - `analytics.py` — financial state, Q9 forecast, scenarios, budget sequencing and economic impacts.
+
+## Digital Twin
+
+- `digital_twin_snapshots` stores a locked baseline derived from approved Actuals.
+- `digital_twin_runs` stores every Low/Base/High projection and its assumptions.
+- `POST /api/simulation/{quarter}` runs and persists the twin alongside the deterministic portfolio result.
+- `GET /api/digital-twin/{quarter}` exposes the baseline and recent runs without changing Actuals.
+- The Decision Agent reads the same model through `get_digital_twin`; it cannot approve or overwrite data.
+- State transitions include area cash transfers, funding, receivables timing, production and sales lag, capacity activation, inventory, technology and sales offices.
 
 ## Tests
 
@@ -51,5 +62,6 @@ Render FastAPI service
 - Q4 intelligence based on Q1–Q3.
 - import review and commit.
 - budget-constrained Low/Base/High simulation.
+- Digital Twin transition timing, Actual immutability and persistence.
 - optional Agent disabled safely without exposing a key.
 - opt-in real Supabase persistence test.

@@ -4,6 +4,9 @@ const state = {
   intelligence: null,
   strategyOptimization: null,
   insights: null,
+  marketIntelligence: null,
+  governanceSessions: [],
+  learningLedger: null,
   financeRange: null,
   reportMode: "cumulative",
   actions: [],
@@ -26,6 +29,7 @@ const score = value => value == null ? "—" : fmt(value, 1);
 const pct = value => value == null ? "—" : `${fmt(Number(value) * (Math.abs(Number(value)) <= 1 ? 100 : 1), 1)}%`;
 const signedSf = value => value == null ? "—" : `${Number(value) > 0 ? "+" : ""}${fmt(value)} SF`;
 const signedScore = value => value == null ? "—" : `${Number(value) > 0 ? "+" : ""}${fmt(value, 1)}`;
+let menuReturnFocus = null;
 
 async function api(path, options = {}) {
   const response = await fetch(path, options);
@@ -368,19 +372,27 @@ function installFieldAdvice() {
 }
 
 function openMenu() {
+  menuReturnFocus = document.activeElement;
   document.body.classList.add("menu-open");
-  $("#sideNav").setAttribute("aria-hidden", "false");
+  const sideNav = $("#sideNav");
+  sideNav.setAttribute("aria-hidden", "false");
+  sideNav.inert = false;
   $("#menuButton").setAttribute("aria-expanded", "true");
   $("#menuButton").setAttribute("aria-label", "סגירת תפריט");
   $("#menuOverlay").hidden = false;
+  sideNav.querySelector("button:not([disabled]), a[href]")?.focus();
 }
 
 function closeMenu() {
+  const wasOpen = document.body.classList.contains("menu-open");
   document.body.classList.remove("menu-open");
-  $("#sideNav").setAttribute("aria-hidden", "true");
+  const sideNav = $("#sideNav");
+  sideNav.setAttribute("aria-hidden", "true");
+  sideNav.inert = true;
   $("#menuButton").setAttribute("aria-expanded", "false");
   $("#menuButton").setAttribute("aria-label", "פתיחת תפריט");
   $("#menuOverlay").hidden = true;
+  if (wasOpen && menuReturnFocus instanceof HTMLElement) menuReturnFocus.focus();
 }
 
 function showSection(name) {
@@ -424,7 +436,60 @@ function renderScoreAndForecast() {
   $("#futureScore").textContent = score(card.future?.score);
   $("#pastCoverage").textContent = `כיסוי נתונים ${pct(card.past?.coverage)}`;
   $("#futureCoverage").textContent = `כיסוי נתונים ${pct(card.future?.coverage)}`;
-  $("#availableBudget").textContent = sf(financial.available_budget_sf);
+  $("#liquidityPosition").textContent = sf(financial.ending_cash_sf);
+  $("#liquidityNote").textContent = `רצפה ${sf(financial.cash_buffer_sf)} · פנוי להחלטות ${sf(financial.available_budget_sf)}`;
+  const reviewSummary = data?.action_review?.summary || {};
+  const blockerCount = num(reviewSummary.blocked_count) + num(reviewSummary.missing_data_count);
+  $("#decisionBlockers").textContent = fmt(blockerCount);
+  $("#decisionBlockersNote").textContent = blockerCount
+    ? `${fmt(reviewSummary.blocked_count || 0)} חסומים · ${fmt(reviewSummary.missing_data_count || 0)} חסרי מידע`
+    : "לא זוהו חסמים פתוחים";
+  const actualCoverage = data?.financial?.actual_coverage || {};
+  const blockingActions = (data?.action_review?.actions || [])
+    .filter(row => ["blocked", "missing_data"].includes(row.status))
+    .slice(0, 3);
+  const gate = $("#decisionGateBanner");
+  let gateStatus = "ready";
+  let gateTitle = "מוכן לדיון צוות";
+  let gateText = "לא זוהו חסמי חוק או מידע ב־5 ההחלטות הקריטיות.";
+  if (!actualCoverage.data_as_of) {
+    gateStatus = "blocked";
+    gateTitle = "חסום — אין Actual מאושר";
+    gateText = "העלו ואשרו דוחות רבעוניים לפני הסתמכות על המלצות.";
+  } else if (num(reviewSummary.blocked_count) > 0) {
+    gateStatus = "blocked";
+    gateTitle = "חסום — נדרש תיקון";
+    gateText = `${fmt(reviewSummary.blocked_count)} פעולות מפרות חוק או מגבלה.`;
+  } else if (num(reviewSummary.missing_data_count) > 0) {
+    gateStatus = "conditional";
+    gateTitle = "מותנה — חסר מידע";
+    gateText = `${fmt(reviewSummary.missing_data_count)} פעולות ממתינות לנתון מאושר.`;
+  }
+  gate.className = `decision-gate ${gateStatus}`;
+  gate.innerHTML = `<div><span>DECISION GATE</span><strong>${esc(gateTitle)}</strong><p>${esc(gateText)}</p></div>${
+    blockingActions.length
+      ? `<details><summary>הצגת ${fmt(blockingActions.length)} תיקונים ראשונים</summary><ol>${blockingActions.map(row => `<li><bdi dir="ltr">${esc(row.code || "")}</bdi> · ${esc(row.title || row.name || "")}: ${esc(row.gate || row.reason || "נדרש להשלים מידע או לתקן את הפעולה.")}</li>`).join("")}</ol></details>`
+      : ""
+  }`;
+  const evidence = data?.evidence_gate || {};
+  const evidenceElement = $("#evidenceGateSummary");
+  const evidenceStatus = evidence.status || "unknown";
+  const evidenceClass = evidenceStatus === "pass" ? "ready" : evidenceStatus;
+  const evidenceTitle = {
+    pass: "המספרים ניתנים לשחזור",
+    conditional: "יש לאשר הנחות לפני הזנה",
+    blocked: "אין להשתמש במספרים המוצעים",
+  }[evidenceStatus] || "שער הראיות ממתין לנתונים";
+  const evidenceGaps = [...(evidence.contradictions || []), ...(evidence.gaps || [])].slice(0, 5);
+  evidenceElement.className = `evidence-gate-summary ${evidenceClass}`;
+  evidenceElement.innerHTML = `<div><span>NUMBER EVIDENCE GATE</span><strong>${esc(evidenceTitle)}</strong><p>${esc(evidence.summary || "כל מספר יעבור בדיקת מקור, נוסחה, טווח וודאות.")}</p></div>
+    <div class="evidence-gate-counts">
+      <span><b>${fmt(evidence.passed_count || 0)}</b> מאושר</span>
+      <span><b>${fmt(evidence.conditional_count || 0)}</b> מותנה</span>
+      <span><b>${fmt(evidence.blocked_count || 0)}</b> חסום</span>
+      <span><b>${fmt(evidence.score == null ? 0 : evidence.score)}</b> ציון ראיות</span>
+    </div>
+    ${evidenceGaps.length ? `<details><summary>מה חסר כדי לשחרר מספרים?</summary><ul>${evidenceGaps.map(item => `<li>${esc(item)}</li>`).join("")}</ul></details>` : ""}`;
   $("#scenarioBudgetLabel").textContent = `תקציב ${sf(financial.available_budget_sf)}`;
 }
 
@@ -546,6 +611,23 @@ function renderRecommendations() {
   renderActionReview();
   renderExecutionBlueprint();
   const rows = state.intelligence?.recommendations || [];
+  const actualCoverage = state.intelligence?.financial?.actual_coverage || {};
+  if (!actualCoverage.data_as_of) {
+    $("#decisionDependencySummary").innerHTML = "";
+    $("#recommendationsList").innerHTML = `
+      <section class="decision-data-gate" role="status">
+        <span class="panel-kicker">DATA GATE</span>
+        <h3>אין עדיין בסיס מאושר להמלצות</h3>
+        <p>כדי למנוע המלצות שווא על אפסים או נתוני דמו, המערכת לא תציע פעולות לפני אישור דוח Actual אחד לפחות.</p>
+        <ol>
+          <li>העלו את דוחות Q1, Q2 ו־Q3 בצ'אט AI או במסך הקבצים.</li>
+          <li>עברו על תצוגת החילוץ ואשרו כל רבעון.</li>
+          <li>חזרו לחדר ההחלטות לקבלת המלצות מספריות, תלויות ותחזית Q9.</li>
+        </ol>
+        <button class="button primary" type="button" data-go-to-files>להעלאת דוחות</button>
+      </section>`;
+    return;
+  }
   const review = state.intelligence?.action_review || {};
   const graph = state.intelligence?.decision_dependencies || {};
   const sequence = graph.recommended_sequence || [];
@@ -570,10 +652,39 @@ function renderRecommendations() {
     if (["תמחור", "שיווק"].some(token => domain.includes(token))) return "marketing";
     return "strategy";
   };
+  const ownerForRecommendation = row => {
+    const category = recommendationCategory(row);
+    return {finance: "CFO", operations: "COO", marketing: "CMO", strategy: "CEO"}[category] || "הנהלה";
+  };
   const recommendationCard = (row, index) => {
     const impact = row.economic_impact || {};
     const ai = row.ai_recommendation || {};
     const dependencies = row.dependencies || {};
+    const numberGate = row.number_gate || {};
+    const numberGateStatus = numberGate.status || "blocked";
+    const numberGateLabel = {pass: "מספרים מאושרים", conditional: "מספרים מותנים", blocked: "מספרים חסומים"}[numberGateStatus] || "לא נבדק";
+    const displayEvidenceValue = claim => {
+      const value = Array.isArray(claim.value) ? claim.value.map(item => `MR${item}`).join(", ") : claim.value;
+      if (value == null || value === "") return "—";
+      return typeof value === "number" ? `${fmt(value)} ${claim.unit || ""}`.trim() : `${value} ${claim.unit || ""}`.trim();
+    };
+    const displayRange = claim => {
+      const range = claim.range || {};
+      if (range.low == null || range.base == null || range.high == null || typeof range.base !== "number") return "—";
+      return `${fmt(range.low)} / ${fmt(range.base)} / ${fmt(range.high)} ${claim.unit || ""}`.trim();
+    };
+    const evidenceClaims = numberGate.claims || [];
+    const blueprintRows = (state.intelligence?.execution_blueprint?.rows || [])
+      .filter(item => item.recommendation_id === row.id);
+    const aiProposal = blueprintRows.length
+      ? blueprintRows.slice(0, 3).map(item => `${item.form_code || "טופס"} · ${item.field_name || item.action_name}: ${item.recommended_value || "מותנה"}`).join(" | ")
+      : (ai.verdict || "נדרש ניתוח נוסף");
+    const teamDecision = (state.decisions || []).find(item =>
+      item.quarter === state.quarter && String(item.title || "").trim() === String(row.title || "").trim()
+    );
+    const teamProposal = teamDecision?.selected_option || "טרם הוגדרה הצעת צוות";
+    const decisionStatus = teamDecision?.status || "ממתין לדיון";
+    const owner = teamDecision?.owner || ownerForRecommendation(row);
     const dependencyItems = [
       ...(dependencies.prerequisites || []).map(item => `<li><b>תנאי מקדים:</b> ${esc(item.title)} — ${esc(item.reason)}</li>`),
       ...(dependencies.coordinates_with || []).map(item => `<li><b>לקבוע יחד עם:</b> ${esc(item.title)} — ${esc(item.reason)}</li>`),
@@ -584,7 +695,7 @@ function renderRecommendations() {
     return `<article class="recommendation" dir="rtl">
       <span class="priority">${index + 1}</span>
       <div class="recommendation-main">
-        <div class="recommendation-meta"><span class="soft-pill">${esc(row.domain)}</span><span class="risk-label">סיכון ${esc(row.risk || "—")}</span><span class="health-badge ${esc(ai.level || "unknown")}">${esc(ai.verdict || "ממתין לניתוח")}</span></div>
+        <div class="recommendation-meta"><span class="soft-pill">${esc(row.domain)}</span><span class="risk-label">סיכון ${esc(row.risk || "—")}</span><span class="health-badge ${esc(ai.level || "unknown")}">${esc(ai.verdict || "ממתין לניתוח")}</span><span class="number-gate-badge ${esc(numberGateStatus)}">${esc(numberGateLabel)}</span></div>
         <strong>${esc(row.title)}</strong>
         <small>${esc(row.rationale)}</small>
         <div class="impact-horizon"><span>טווח קצר · הרבעון הקרוב</span><span>טווח ארוך · עד Q9</span></div>
@@ -595,6 +706,37 @@ function renderRecommendations() {
           <div><span>שינוי אומדן Q9</span><strong class="${num(impact.q9_score_delta) < 0 ? "negative" : "positive"}">${signedScore(impact.q9_score_delta)}</strong></div>
         </div>
         <p class="ai-explanation"><b>המלצת AI/מערכת:</b> ${esc(ai.explanation || "נדרשים נתונים נוספים.")} <span>ודאות ${esc(ai.confidence || "נמוכה")}</span></p>
+        <details class="number-evidence ${esc(numberGateStatus)}">
+          <summary>איך הגענו למספרים? · ${fmt(evidenceClaims.length)} טענות מספריות</summary>
+          <div class="number-evidence-body">
+            <p class="number-evidence-summary">${esc(numberGate.summary || "המספרים טרם עברו ביקורת ראיות.")}</p>
+            ${numberGate.contradictions?.length ? `<div class="evidence-alert critical"><b>סתירות:</b><ul>${numberGate.contradictions.map(item => `<li>${esc(item)}</li>`).join("")}</ul></div>` : ""}
+            ${numberGate.gaps?.length ? `<div class="evidence-alert warning"><b>מידע חסר:</b><ul>${numberGate.gaps.map(item => `<li>${esc(item)}</li>`).join("")}</ul></div>` : ""}
+            <div class="number-claim-list">${evidenceClaims.map(claim => `<article class="number-claim ${esc(claim.status || "blocked")}">
+              <header><strong>${esc(claim.label || claim.metric)}</strong><span>${esc(displayEvidenceValue(claim))}</span><b>${esc(claim.status === "supported" ? "מאושר" : claim.status === "conditional" ? "מותנה" : "חסום")}</b></header>
+              <p><b>סוג:</b> ${esc(claim.claim_type || "—")} · <b>ודאות:</b> ${esc(claim.confidence || "low")}</p>
+              <p><b>נוסחה:</b> ${esc(claim.formula || "אין נוסחה — נתון ישיר")}</p>
+              <p><b>טווח נמוך / בסיס / גבוה:</b> ${esc(displayRange(claim))}</p>
+              <p><b>מקור:</b> ${(claim.source_refs || []).length ? claim.source_refs.map(source => `<span class="evidence-source">${esc(source.label || source.id)}</span>`).join(" ") : '<span class="evidence-source missing">לא קיים מקור מאושר</span>'}</p>
+            </article>`).join("")}</div>
+          </div>
+        </details>
+        <div class="team-ai-compare">
+          <div class="ai-proposal"><span>הצעת AI המספרית</span><strong>${esc(aiProposal)}</strong></div>
+          <div class="team-proposal">
+            <span>החלטת הצוות</span>
+            <input type="text" value="${esc(teamProposal)}" data-team-proposal="${index}" aria-label="החלטת הצוות עבור ${esc(row.title)}">
+            <div class="inline-decision-actions">
+              <button class="button compact-button primary" type="button" data-adopt-recommendation="${index}" ${numberGateStatus === "blocked" ? "disabled title=\"המספר חסום עד השלמת ראיות\"" : ""}>אימוץ הצעת AI</button>
+              <button class="button compact-button secondary" type="button" data-save-team-recommendation="${index}">שמירת טיוטה</button>
+            </div>
+          </div>
+        </div>
+        <div class="decision-governance">
+          <span><b>Owner</b> ${esc(owner)}</span>
+          <span><b>סטטוס</b> ${esc(decisionStatus)}</span>
+          <span><b>ודאות</b> ${esc(ai.confidence || "נמוכה")}</span>
+        </div>
         <div class="dependency-note">
           <div><b>שלב ${fmt(dependencies.sequence_step || index + 1)} במהלך הכולל</b><span>${dependencyItems.length ? `${dependencyItems.length} קשרים שדורשים תיאום` : "אין תלות מחייבת שזוהתה"}</span></div>
           ${dependencyItems.length ? `<ul>${dependencyItems.join("")}</ul>` : ""}
@@ -609,11 +751,15 @@ function renderRecommendations() {
     </article>`;
   };
   const indexedRows = rows.map((row, index) => ({row, index}));
-  $("#recommendationsList").innerHTML = rows.length ? DECISION_CATEGORY_ORDER.map(category => {
+  const rankedCategories = DECISION_CATEGORY_ORDER.map(category => {
     const matches = indexedRows.filter(item => recommendationCategory(item.row) === category.key);
+    return {...category, matches, firstPriority: matches[0]?.index ?? Number.MAX_SAFE_INTEGER};
+  }).filter(category => category.matches.length).sort((a, b) => a.firstPriority - b.firstPriority);
+  $("#recommendationsList").innerHTML = rows.length ? rankedCategories.map(category => {
+    const matches = category.matches;
     return `<section class="recommendation-category-group category-${category.key}">
       <header><div><span>${esc(category.labelEn)}</span><h3>${esc(category.label)}</h3></div><b>${fmt(matches.length)}</b></header>
-      <div class="recommendation-list">${matches.length ? matches.map(item => recommendationCard(item.row, item.index)).join("") : '<div class="category-clear">לא נמצאה פעולה מומלצת בתחום זה לאחר הבדיקה.</div>'}</div>
+      <div class="recommendation-list">${matches.map(item => recommendationCard(item.row, item.index)).join("")}</div>
     </section>`;
   }).join("") : '<div class="empty-copy">אין עדיין מספיק נתונים ליצירת המלצות.</div>';
 }
@@ -807,6 +953,30 @@ function renderStrategyOptimization() {
       ${item.violations?.length ? `<div class="scenario-violation">${esc(item.violations[0])}</div>` : ""}
     </article>`;
   }).join("") : '<div class="empty-copy">אין מספיק נתונים להשוואת חלופות.</div>';
+
+  const optimizer = data.integrated_optimization || {};
+  const winner = optimizer.winner || null;
+  const robustness = $("#q9OptimizerRobustness");
+  robustness.className = `status-chip ${winner ? (optimizer.robust_to_weight_sensitivity ? "ok" : "") : "error"}`;
+  robustness.textContent = !winner ? "אין סל אפשרי" : optimizer.robust_to_weight_sensitivity ? "יציב לשינוי משקלים" : "רגיש למשקלי הציון";
+  $("#q9OptimizerSummary").innerHTML = winner ? [
+    `<div><span>חלופות שנבדקו</span><strong>${fmt(optimizer.evaluated_portfolios)}</strong><small>${fmt(optimizer.feasible_portfolios)} אפשריות</small></div>`,
+    `<div><span>אומדן Q9</span><strong>${score(winner.q9_score?.base)}</strong><small>${score(winner.q9_score?.low)}–${score(winner.q9_score?.high)}</small></div>`,
+    `<div><span>עלות הסל</span><strong>${sf(winner.budget?.planned_cost_sf || 0)}</strong><small>יתרה ${sf(winner.budget?.remaining_sf)}</small></div>`,
+    `<div><span>פעולות</span><strong>${fmt(winner.action_count)}</strong><small>נבחרו יחד, לא בנפרד</small></div>`,
+  ].join("") : '<div class="empty-copy">לא נמצא סל שעומד יחד בחוקי המשחק, בתקציב, ברצפת המזומן ובתלויות.</div>';
+  const orderedActions = winner?.sequence?.length
+    ? winner.sequence
+    : (winner?.actions || []).map((action, index) => ({step: index + 1, action, depends_on: []}));
+  $("#q9OptimizerActions").innerHTML = orderedActions.length ? orderedActions.map(item => {
+    const action = item.action || item;
+    const dependencies = item.depends_on || action.depends_on || [];
+    return `<div class="strategy-gate good"><span>${fmt(item.step || 1)}</span><div><strong>${esc(action.title || action.code || action.type || "פעולה")}</strong><p>${sf(action.cost_sf || item.cost_sf || 0)}${dependencies.length ? ` · תלוי ב־${esc(dependencies.join(", "))}` : " · ללא קדם־תנאי פתוח"}</p></div></div>`;
+  }).join("") : '<div class="empty-copy">הסל המיטבי כרגע הוא להימנע מפעולה חדשה עד השלמת ראיות או תקציב.</div>';
+  $("#q9OptimizerSensitivity").innerHTML = (optimizer.weight_sensitivity || []).map(item => {
+    const same = winner && item.winner_id === winner.id;
+    return `<div class="compact-row"><div><strong>${fmt(item.past_weight * 100)}% כסף / ${fmt(item.future_weight * 100)}% פוטנציאל</strong><small>${same ? "אותו סל נשאר ראשון" : "הסל המוביל משתנה"}</small></div><span class="health-badge ${same ? "good" : "watch"}">${same ? "יציב" : "רגיש"}</span></div>`;
+  }).join("") || '<div class="empty-copy">אין מספיק חלופות אפשריות לניתוח רגישות.</div>';
 
   $("#strategyDeltas").innerHTML = (data.strategy_deltas || []).length ? data.strategy_deltas.map(item => `
     <div class="strategy-delta">
@@ -1033,6 +1203,36 @@ function renderResearchInsights() {
   }).join("") : '<div class="empty-copy">לא נמצאו מחקרי שוק בתחום שנבחר.</div>';
 }
 
+function renderLearningLedger() {
+  const ledger = state.learningLedger || {};
+  const summary = ledger.summary || {};
+  const latestForecast = (ledger.forecasts || [])[0] || {};
+  const q9Score = latestForecast.result?.q9?.score?.base;
+  $("#learningSummary").innerHTML = [
+    `<div><span>תחזיות שננעלו</span><strong>${fmt(summary.forecast_snapshots || 0)}</strong><small>נשמרות לפני קבלת Actual</small></div>`,
+    `<div><span>דיוק ממוצע</span><strong>${summary.average_accuracy_score == null ? "—" : `${fmt(summary.average_accuracy_score, 1)}%`}</strong><small>משוקלל על המדדים שנמדדו</small></div>`,
+    `<div><span>כיולים מאושרים</span><strong>${fmt(summary.approved_calibrations || 0)}</strong><small>${fmt(summary.pending_calibrations || 0)} ממתינים לבדיקת הצוות</small></div>`,
+    `<div><span>אומדן Q9 נוכחי</span><strong>${score(q9Score)}</strong><small>מהתחזית הפתוחה האחרונה · לא ציון רשמי</small></div>`,
+  ].join("");
+
+  const evaluations = ledger.evaluations || [];
+  $("#learningEvaluations").innerHTML = evaluations.length ? evaluations.map(row => {
+    const result = row.summary || {};
+    const metricRows = Object.values(row.metric_errors || {}).sort((a, b) => Math.abs(num(b.percentage_error)) - Math.abs(num(a.percentage_error))).slice(0, 5);
+    const metrics = metricRows.map(metric => `<div class="learning-metric ${metric.within_range ? "within" : "miss"}"><span>${esc(metric.label)}</span><strong><bdi dir="ltr">${fmt(metric.forecast, 1)} → ${fmt(metric.actual, 1)}</bdi></strong><small>${metric.percentage_error == null ? "—" : `${num(metric.percentage_error) > 0 ? "+" : ""}${fmt(num(metric.percentage_error) * 100, 1)}%`} · ${metric.within_range ? "בתוך הטווח" : "מחוץ לטווח"}</small></div>`).join("");
+    const drivers = (row.driver_analysis || []).map(driver => `<li class="${esc(driver.severity || "low")}"><strong>${esc(driver.finding)}</strong><small>Driver: ${esc(driver.driver)}</small></li>`).join("");
+    return `<article class="learning-evaluation-card"><div class="learning-evaluation-head"><div><span class="soft-pill"><bdi dir="ltr">${esc(row.source_actual_quarter || "—")} → ${esc(row.target_quarter)}</bdi></span><h3>תחקיר התחזית של ${esc(row.target_quarter)}</h3></div><div class="accuracy-orb ${num(result.accuracy_score) >= 75 ? "good" : num(result.accuracy_score) >= 50 ? "warning" : "critical"}"><strong>${result.accuracy_score == null ? "—" : fmt(result.accuracy_score, 0)}</strong><span>דיוק</span></div></div><div class="learning-metrics">${metrics}</div><div class="driver-analysis"><h4>למה טעינו או צדקנו</h4><ul>${drivers || "<li>אין מספיק מדדים לאבחון.</li>"}</ul></div></article>`;
+  }).join("") : '<div class="empty-copy">לא הושלמה עדיין השוואת Forecast→Actual. נועלים תחזית לפני הרבעון, ולאחר אישור הדוח הבא מתקבל כאן תחקיר אוטומטי.</div>';
+
+  const proposals = (ledger.calibration_proposals || []).filter(row => row.status === "draft");
+  $("#calibrationProposals").innerHTML = proposals.length ? proposals.map(row => `<article class="calibration-card"><div><span class="soft-pill">ודאות ${esc(row.confidence)}</span><h4>${esc(row.parameter_key)}</h4><p>${esc(row.reason)}</p><strong><bdi dir="ltr">${fmt(row.previous_value, 3)} → ${fmt(row.proposed_value, 3)}</bdi></strong></div><div class="calibration-actions"><button class="button secondary" type="button" data-calibration-status="rejected" data-calibration-id="${esc(row.id)}">דחייה</button><button class="button primary" type="button" data-calibration-status="approved" data-calibration-id="${esc(row.id)}">אישור לכיולים עתידיים</button></div></article>`).join("") : '<div class="empty-copy">אין כרגע הצעות כיול שממתינות להחלטה.</div>';
+}
+
+async function loadLearningLedger() {
+  state.learningLedger = await api(`/api/learning-ledger?quarter=${encodeURIComponent(state.quarter)}`);
+  renderLearningLedger();
+}
+
 function renderInsights() {
   const trends = state.insights?.trends || {};
   const cards = [...(trends.cards || []), ...(trends.cross_research || [])];
@@ -1050,9 +1250,20 @@ async function loadInsights() {
 
 async function loadResearch() {
   const domain = $("#researchDomainSelect").value || "";
-  const data = await api(`/api/research/relevant/${state.quarter}?domain=${encodeURIComponent(domain)}`);
+  const [data, intelligence] = await Promise.all([
+    api(`/api/research/relevant/${state.quarter}?domain=${encodeURIComponent(domain)}`),
+    api(`/api/market-intelligence/${state.quarter}`),
+  ]);
+  state.marketIntelligence = intelligence;
   $("#researchResults").innerHTML = data.results.length ? data.results.map(row => `<article class="research-card ${row.relevant ? "relevant" : ""}"><div class="research-meta"><span class="soft-pill">${esc(row.quarter)}</span><span class="soft-pill">ודאות ${esc(row.confidence)}</span>${row.area ? `<span class="soft-pill">${esc(row.area)}</span>` : ""}</div><h2>${esc(row.title)}</h2><p>${esc(row.key_result || "טרם הוזן סיכום מובנה למחקר.")}</p><button class="text-link rtl-next-link" type="button" data-ask-research="${esc(row.title)}">שאל את ה-Agent על המחקר</button></article>`).join("") : '<div class="empty-copy">לא נקלטו מחקרי שוק מאושרים.</div>';
   $("#researchCatalog").innerHTML = data.catalog.map(row => `<div class="compact-row"><div><strong>MR${esc(row.study_id)} · ${esc(row.name)}</strong><small>${esc(row.description)}</small></div><span class="soft-pill">${row.cost_k_sf == null ? "עלות לא ידועה" : `${fmt(row.cost_k_sf)}K SF`}</span></div>`).join("");
+  const voi = intelligence.recommended_research || [];
+  $("#voiRecommendations").innerHTML = voi.length ? voi.map((row, index) => `<div class="compact-row"><div><strong>${index + 1}. ${esc(row.label)} · ${esc(row.name)}</strong><small>עלות ${sf(row.cost_sf)} · הסתברות שינוי החלטה ${pct(row.decision_change_probability)} · פעולות ${esc((row.affected_actions || []).join(", "))}</small><p>${row.value_status === "quantified" ? `VOI נטו משוער: ${signedSf(row.net_voi_sf)}` : "אין חשיפה כספית מאושרת—הדירוג איכותני בלבד."}</p></div><span class="soft-pill">${esc(row.confidence)}</span></div>`).join("") : '<div class="empty-copy">אין כרגע מחקר נוסף בעל קשר מוכח להחלטה פתוחה.</div>';
+  const calibrations = intelligence.calibration_signals || [];
+  $("#researchCalibrations").innerHTML = calibrations.length ? calibrations.map(row => `<div class="compact-row"><div><strong>${esc(row.segment)}</strong><small>${row.observation_count} תצפיות · ${row.independent_price_changes} שינויי מחיר מהותיים</small><p>${row.elasticity_estimate == null ? esc(row.warning) : `אלסטיות טיוטה ${fmt(row.elasticity_estimate, 3)} · טווח ${fmt(row.range?.[0], 3)}–${fmt(row.range?.[1], 3)}. ${esc(row.warning)}`}</p></div><span class="soft-pill">${row.status === "sufficient_for_draft" ? "טיוטת הסקה" : "לא מספיק מידע"}</span></div>`).join("") : '<div class="empty-copy">אין עדיין תצפיות מחיר–מכירות תקינות לכיול.</div>';
+  $("#researchUnknowns").innerHTML = (intelligence.cannot_conclude || []).map(text => `<div class="compact-row"><div><strong>גבול ידע</strong><small>${esc(text)}</small></div></div>`).join("") || '<div class="empty-copy">לא זוהו פערי ידע קריטיים.</div>';
+  const coverage = intelligence.mapping_coverage || {};
+  $("#researchCoverage").textContent = `מיפוי ${fmt(coverage.percent, 1)}% · ${coverage.mapped || 0}/${coverage.catalog_total || 0}`;
 }
 
 function renderDecisionLog(rows) {
@@ -1069,16 +1280,63 @@ function renderDecisionLog(rows) {
     `<div><span>כוללות למידה בפועל</span><strong>${learned}</strong><small>תחזית מול ביצוע</small></div>`,
   ].join("");
   $("#decisionLogList").innerHTML = filtered.length ? filtered.map(row => `<article class="decision-log-card" data-decision-id="${esc(row.id)}">
-    <div class="decision-log-head"><div><span class="soft-pill">${esc(row.quarter)}</span><span class="soft-pill">${esc(row.domain || "אסטרטגיה")}</span><h3>${esc(row.title)}</h3></div><label>סטטוס<select data-decision-field="status"><option ${row.status === "טיוטה" ? "selected" : ""}>טיוטה</option><option ${row.status === "אושר" ? "selected" : ""}>אושר</option><option ${row.status === "בוצע" ? "selected" : ""}>בוצע</option><option ${row.status === "נסגר" ? "selected" : ""}>נסגר</option></select></label></div>
+    <div class="decision-log-head"><div><span class="soft-pill">${esc(row.quarter)}</span><span class="soft-pill">${esc(row.domain || "אסטרטגיה")}</span><h3>${esc(row.title)}</h3></div><label>סטטוס<select data-decision-field="status"><option ${row.status === "טיוטה" ? "selected" : ""}>טיוטה</option><option ${row.status === "מוכן לאישור" ? "selected" : ""}>מוכן לאישור</option><option ${row.status === "אושר" ? "selected" : ""}>אושר</option><option ${row.status === "בוצע" ? "selected" : ""}>בוצע</option><option ${row.status === "נסגר" ? "selected" : ""}>נסגר</option></select></label></div>
     <div class="decision-log-grid"><div><span>מה הוחלט</span><p>${esc(row.selected_option || "טרם תועד")}</p></div><div><span>הנימוק בזמן ההחלטה</span><p>${esc(row.rationale || "טרם תועד")}</p></div><div><span>תוצאה צפויה</span><p>${esc(row.expected_result || "טרם תועדה")}</p></div><label><span>מה קרה בפועל / מה למדנו</span><textarea data-decision-field="actual_result" rows="3">${esc(row.actual_result || "")}</textarea></label></div>
     <div class="decision-log-foot"><small>בעל אחריות: ${esc(row.owner || "לא הוגדר")} · ודאות ${esc(row.confidence || "—")}</small><button class="button secondary" type="button" data-save-decision="${esc(row.id)}">שמירת עדכון</button></div>
   </article>`).join("") : '<div class="empty-copy">אין החלטות התואמות את הסינון. אפשר לשמור המלצה ישירות מחדר ההחלטות.</div>';
 }
 
 async function loadDecisionLog() {
-  const rows = await api("/api/decisions");
+  const [rows, sessions] = await Promise.all([
+    api("/api/decisions"),
+    api(`/api/governance/sessions?quarter=${encodeURIComponent(state.quarter)}`),
+  ]);
   state.decisions = rows;
+  state.governanceSessions = sessions;
   renderDecisionLog(rows);
+  renderGovernanceSession();
+  if (state.intelligence) renderRecommendations();
+}
+
+function renderGovernanceSession() {
+  const session = (state.governanceSessions || [])[0];
+  const status = $("#governanceStatus");
+  const form = $("#governanceVoteForm");
+  const approve = $("#approveGovernanceSession");
+  if (!session) {
+    status.className = "status-chip";
+    status.textContent = "אין ישיבה פעילה";
+    $("#governanceMachineGate").innerHTML = '<div class="empty-copy">פתחו ישיבה מהסל המומלץ לאחר השלמת אופטימיזציית Q9.</div>';
+    $("#governanceRoles").innerHTML = "";
+    form.classList.add("hidden");
+    approve.disabled = true;
+    return;
+  }
+  const gate = session.governance_gate || {};
+  const labels = {
+    approved: "אושר וננעל", ready_to_approve: "מוכן לאישור", awaiting_roles: "ממתין לתפקידים",
+    awaiting_consensus: "ממתין להסכמה", changes_requested: "נדרשים שינויים", blocked_by_controls: "חסום בבקרות",
+  };
+  const locked = Boolean(session.locked);
+  status.className = `status-chip ${locked || gate.can_approve ? "ok" : gate.failed_machine_checks?.length ? "error" : ""}`;
+  status.textContent = labels[session.status] || labels[gate.status] || session.status;
+  const checkLabels = {
+    optimizer_feasible: "סל אפשרי", evidence_pass: "ראיות מספריות", rules_pass: "חוקי המשחק",
+    budget_pass: "תקציב ורצפת מזומן", dependencies_pass: "תלויות והתנגשויות", timing_pass: "תזמון",
+  };
+  $("#governanceMachineGate").innerHTML = Object.entries(gate.machine_checks || {}).map(([key, passed]) => `<div class="governance-check ${passed ? "pass" : "fail"}"><span>${passed ? "✓" : "!"}</span><div><strong>${esc(checkLabels[key] || key)}</strong><small>${passed ? "עבר" : "חוסם אישור"}</small></div></div>`).join("");
+  const votes = Object.fromEntries((session.votes || []).map(row => [row.role, row]));
+  $("#governanceRoles").innerHTML = (session.roles || []).map(item => {
+    const vote = votes[item.role];
+    const voteLabel = vote?.vote === "approve" ? "מאושר" : vote?.vote === "reject" ? "מבקש שינוי" : vote?.vote === "abstain" ? "נמנע" : "ממתין";
+    return `<article class="governance-role ${esc(vote?.vote || "pending")}"><span>${vote?.vote === "approve" ? "✓" : vote?.vote === "reject" ? "!" : "○"}</span><div><strong>${esc(item.label)}</strong><small>${vote ? `${esc(vote.voter_name)} · ${voteLabel}` : voteLabel}</small>${vote?.rationale ? `<p>${esc(vote.rationale)}</p>` : ""}</div></article>`;
+  }).join("");
+  form.classList.toggle("hidden", locked);
+  approve.disabled = locked || !gate.can_approve;
+  approve.textContent = locked ? "הישיבה אושרה וננעלה" : "אישור ונעילת הישיבה";
+  $("#governancePolicy").textContent = locked
+    ? `אושר על ידי ${(session.approved_by || []).join(", ")} · האישור אינו שליחה ל־INTOPIA.`
+    : `${gate.approval_count || 0}/5 אישורים · נדרשות עמדות מכל התפקידים, לפחות ארבעה אישורים וללא התנגדות מתפקיד חוסם.`;
 }
 
 function renderActionBasket() {
@@ -1113,6 +1371,46 @@ function renderSimulation(result) {
           ${dependencyConflicts.map(item => `<li class="dependency-warning"><b>התנגשות:</b> ${esc(item.reason)}</li>`).join("")}
         </ul>
       </div>
+    `);
+  }
+  const twin = result.digital_twin?.base;
+  const twinTimeline = twin?.timeline || [];
+  if (twinTimeline.length) {
+    const baselineQuarter = result.digital_twin?.baseline?.as_of_quarter || "—";
+    const eventLabel = kind => ({
+      cash_cost: "תשלום", funding: "מימון", economic_effect: "השפעה כלכלית",
+      inventory_produced: "ייצור למלאי", inventory_sold: "מכירה מהמלאי",
+      capacity_online: "קיבולת זמינה", technology_available: "טכנולוגיה זמינה",
+      rd_investment: "מו״פ", receivables_collected: "גביית לקוחות",
+      confidence_update: "מידע חדש",
+    }[kind] || kind);
+    $("#simulationResult").insertAdjacentHTML("beforeend", `
+      <section class="twin-panel" aria-label="Digital Twin">
+        <div class="twin-heading">
+          <div><span class="soft-pill">Digital Twin · Base</span><h3>כך חבילת ההחלטות משנה את החברה עד Q9</h3></div>
+          <small>מצב אמת נעול עד ${esc(baselineQuarter)} · הסימולציה אינה משנה Actuals</small>
+        </div>
+        <div class="twin-timeline">
+          ${twinTimeline.map(item => {
+            const financial = item.state?.consolidated || {};
+            const technology = item.state?.technology || {};
+            const inventory = (item.state?.segments || []).reduce((sum, row) => sum + Number(row.inventory_units || 0), 0);
+            const capacity = (item.state?.segments || []).reduce((sum, row) => sum + Number(row.capacity_units || 0), 0);
+            return `<article class="twin-quarter">
+              <div class="twin-quarter-head"><strong>${esc(item.quarter)}</strong><span>${(item.events || []).length} מעברים</span></div>
+              <dl>
+                <div><dt>מזומן</dt><dd>${sf(financial.cash_sf)}</dd></div>
+                <div><dt>חוב</dt><dd>${sf(financial.debt_sf)}</dd></div>
+                <div><dt>מלאי</dt><dd>${fmt(inventory)} יח׳</dd></div>
+                <div><dt>קיבולת</dt><dd>${fmt(capacity)} יח׳</dd></div>
+                <div><dt>טכנולוגיה</dt><dd><bdi dir="ltr">X${fmt(technology.max_x_grade)} · Y${fmt(technology.max_y_grade)}</bdi></dd></div>
+              </dl>
+              <div class="twin-events">${(item.events || []).length ? item.events.map(event => `<span>${esc(eventLabel(event.kind))}${event.code ? ` · ${esc(event.code)}` : ""}</span>`).join("") : "<span>אין מעבר חדש</span>"}</div>
+            </article>`;
+          }).join("")}
+        </div>
+        <details class="twin-assumptions"><summary>הנחות המודל</summary><ul>${(twin.assumptions || []).map(item => `<li>${esc(item)}</li>`).join("")}</ul></details>
+      </section>
     `);
   }
 }
@@ -1254,10 +1552,25 @@ async function loadSettings() {
 }
 
 function bindNavigation() {
+  $("#sideNav").inert = true;
   $("#menuButton").addEventListener("click", () => document.body.classList.contains("menu-open") ? closeMenu() : openMenu());
   $("#menuOverlay").addEventListener("click", closeMenu);
-  document.addEventListener("keydown", event => { if (event.key === "Escape") closeMenu(); });
-  $$(".nav-item, .primary-tab").forEach(button => button.addEventListener("click", () => showSection(button.dataset.section)));
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape") closeMenu();
+    if (event.key !== "Tab" || !document.body.classList.contains("menu-open")) return;
+    const focusable = $$('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])', $("#sideNav"));
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+  $$(".nav-item").forEach(button => button.addEventListener("click", () => showSection(button.dataset.section)));
   $$('[data-go]').forEach(button => button.addEventListener("click", () => showSection(button.dataset.go)));
 }
 
@@ -1267,7 +1580,8 @@ function bindStrategyOptimization() {
     button.disabled = true;
     button.textContent = "מחשב מחדש…";
     try {
-      await loadStrategyOptimization();
+      state.strategyOptimization = await api(`/api/q9-optimization/${encodeURIComponent(state.quarter)}/refresh`, {method:"POST"});
+      renderStrategyOptimization();
       toast("טיוטת האסטרטגיה עודכנה לפי הנתונים המאושרים");
     } catch (error) {
       toast(error.message, true);
@@ -1326,7 +1640,7 @@ function bindFiles() {
   $("#importsList").addEventListener("click", async event => {
     const id = event.target.dataset.commitImport;
     if (!id) return;
-    try { const result = await api(`/api/imports/${encodeURIComponent(id)}/commit`, {method:"POST"}); toast(`נקלטו ${Object.values(result.counts || {}).reduce((a,b) => a + b, 0)} פריטים`); await Promise.all([loadUploads(), loadIntelligence(), loadReports()]); }
+    try { const result = await api(`/api/imports/${encodeURIComponent(id)}/commit`, {method:"POST"}); toast(`נקלטו ${Object.values(result.counts || {}).reduce((a,b) => a + b, 0)} פריטים`); await Promise.all([loadUploads(), loadIntelligence(), loadReports(), loadInsights(), loadLearningLedger()]); }
     catch (error) { toast(error.message, true); }
   });
   $("#uploadsList").addEventListener("click", async event => {
@@ -1369,8 +1683,43 @@ function bindReportsAndResearch() {
   $("#quarterReportButton").addEventListener("click", async () => { state.reportMode = "quarter"; $("#quarterReportButton").classList.add("active"); $("#cumulativeReportButton").classList.remove("active"); await loadReports(); });
   $("#cumulativeReportButton").addEventListener("click", async () => { state.reportMode = "cumulative"; $("#cumulativeReportButton").classList.add("active"); $("#quarterReportButton").classList.remove("active"); await loadReports(); });
   $("#researchDomainSelect").addEventListener("change", loadResearch);
+  $("#refreshMarketIntelligence").addEventListener("click", async () => {
+    try {
+      await api(`/api/market-intelligence/${state.quarter}/refresh`, {method: "POST"});
+      await loadResearch();
+      toast("ניתוח מחקרי השוק עודכן ונשמר");
+    } catch (error) {
+      toast(error.message, true);
+    }
+  });
   $("#researchResults").addEventListener("click", event => { if (!event.target.dataset.askResearch) return; showSection("agent"); $("#agentForm [name=question]").value = `מה למדנו מהמחקר ${event.target.dataset.askResearch}, ולאילו החלטות הוא רלוונטי?`; });
   $("#insightResearchDomainSelect").addEventListener("change", renderResearchInsights);
+  $("#freezeForecastButton").addEventListener("click", async event => {
+    event.target.disabled = true;
+    try {
+      const result = await api(`/api/learning/forecasts/${encodeURIComponent(state.quarter)}`, {method:"POST"});
+      toast(`תחזית ${result.target_quarter || state.quarter} ננעלה ונשמרה להשוואה עתידית`);
+      await loadLearningLedger();
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      event.target.disabled = false;
+    }
+  });
+  $("#calibrationProposals").addEventListener("click", async event => {
+    const id = event.target.dataset.calibrationId;
+    const status = event.target.dataset.calibrationStatus;
+    if (!id || !status) return;
+    event.target.disabled = true;
+    try {
+      await api(`/api/calibration-proposals/${encodeURIComponent(id)}`, {method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({status})});
+      toast(status === "approved" ? "הכיול אושר ויחול רק על תחזיות עתידיות" : "הצעת הכיול נדחתה");
+      await loadLearningLedger();
+    } catch (error) {
+      toast(error.message, true);
+      event.target.disabled = false;
+    }
+  });
   $("#insightResearchResults").addEventListener("click", event => {
     const title = event.target.dataset.askResearch;
     if (!title) return;
@@ -1409,9 +1758,15 @@ function bindSimulation() {
   });
   $("#actionBasket").addEventListener("click", event => { const index = event.target.dataset.removeAction; if (index == null) return; state.actions.splice(Number(index), 1); renderActionBasket(); });
   $("#recommendationsList").addEventListener("click", event => {
+    if (event.target.closest("[data-go-to-files]")) {
+      showSection("files");
+      return;
+    }
     const simulateIndex = event.target.dataset.simulateRecommendation;
     const askIndex = event.target.dataset.askRecommendation;
     const logIndex = event.target.dataset.logRecommendation;
+    const adoptIndex = event.target.dataset.adoptRecommendation;
+    const saveTeamIndex = event.target.dataset.saveTeamRecommendation;
     if (simulateIndex != null) {
       const row = state.intelligence.recommendations[Number(simulateIndex)];
       state.actions.push({...row.action_template, title: row.title});
@@ -1423,6 +1778,41 @@ function bindSimulation() {
       showSection("agent");
       $("#agentForm [name=question]").value = row.agent_prompt || `נתח את ההחלטה ${row.title} והשווה חלופות במסגרת התקציב.`;
       $("#agentForm [name=question]").focus();
+    }
+    if (adoptIndex != null || saveTeamIndex != null) {
+      const index = Number(adoptIndex ?? saveTeamIndex);
+      const row = state.intelligence.recommendations[index];
+      const impact = row.economic_impact || {};
+      const ai = row.ai_recommendation || {};
+      const blueprintRows = (state.intelligence?.execution_blueprint?.rows || [])
+        .filter(item => item.recommendation_id === row.id);
+      const aiProposal = blueprintRows.length
+        ? blueprintRows.slice(0, 3).map(item => `${item.form_code || "טופס"} · ${item.field_name || item.action_name}: ${item.recommended_value || "מותנה"}`).join(" | ")
+        : (ai.verdict || "נדרש ניתוח נוסף");
+      const input = $(`[data-team-proposal="${index}"]`, $("#recommendationsList"));
+      const selectedOption = adoptIndex != null ? aiProposal : String(input?.value || "").trim();
+      if (!selectedOption) return toast("יש להזין החלטת צוות", true);
+      if (adoptIndex != null && input) input.value = aiProposal;
+      const payload = {
+        quarter: state.quarter,
+        domain: row.domain || "אסטרטגיה",
+        title: row.title,
+        question: row.title,
+        selected_option: selectedOption,
+        rationale: adoptIndex != null
+          ? `הצוות אימץ את הצעת ה-AI. ${ai.explanation || ""}`.trim()
+          : "טיוטת צוות שנשמרה ישירות מחדר ההחלטות.",
+        status: adoptIndex != null ? "מוכן לאישור" : "טיוטה",
+        expected_result: `עלות ${sf(impact.cost_sf)}; שינוי רווח ${signedSf(impact.profit_delta_sf)}; שינוי מזומן ${signedSf(impact.cash_delta_sf)}; שינוי אומדן Q9 ${signedScore(impact.q9_score_delta)}.`,
+        confidence: ai.confidence || "בינונית",
+      };
+      api("/api/decisions", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)})
+        .then(async () => {
+          toast(adoptIndex != null ? "הצעת ה-AI אומצה וממתינה לאישור בעל תפקיד" : "טיוטת הצוות נשמרה");
+          await loadDecisionLog();
+        })
+        .catch(error => toast(error.message, true));
+      return;
     }
     if (logIndex != null) {
       const row = state.intelligence.recommendations[Number(logIndex)];
@@ -1462,9 +1852,11 @@ function bindSimulation() {
         }),
       });
       const ready = pack.status === "ready_for_team_review";
+      const readiness = pack.validation?.readiness || {};
+      const requiredFixes = readiness.required_fixes || [];
       const link = `<a class="button ghost" href="/api/decision-packs/${encodeURIComponent(pack.id)}/export">הורדת חבילת JSON</a>`;
       $("#simulationResult").className = "";
-      $("#simulationResult").innerHTML = `<div class="scenario-status ${ready ? "ok" : "bad"}">${ready ? "החבילה עברה בדיקות חוק, תקציב ותזמון ומוכנה לבדיקת הצוות" : "החבילה נשמרה כטיוטה חסומה ודורשת תיקון"}</div><p>Rulebook v${esc(pack.rulebook_version)} · ${esc(pack.quarter)} · ${esc(pack.name)}</p><div class="action-row">${link}</div>${pack.validation?.violations?.length ? `<div class="simulation-notes"><strong>הפרות חוסמות</strong><ul>${pack.validation.violations.map(item => `<li>${esc(item.rule_id)} · ${esc(item.message)}</li>`).join("")}</ul></div>` : ""}`;
+      $("#simulationResult").innerHTML = `<div class="scenario-status ${ready ? "ok" : "bad"}">${esc(readiness.label || (ready ? "מוכן לבדיקת הצוות" : "חסום — נדרש תיקון"))}</div><p>Rulebook v${esc(pack.rulebook_version)} · ${esc(pack.quarter)} · ${esc(pack.name)}</p><div class="action-row">${link}</div>${requiredFixes.length ? `<div class="simulation-notes readiness-fixes"><strong>מה בדיוק לתקן לפני אישור</strong><ol>${requiredFixes.map(item => `<li>${esc(item)}</li>`).join("")}</ol></div>` : ""}${pack.validation?.violations?.length ? `<div class="simulation-notes"><strong>הפרות חוסמות</strong><ul>${pack.validation.violations.map(item => `<li>${esc(item.rule_id)} · ${esc(item.message)}</li>`).join("")}</ul></div>` : ""}`;
       toast(ready ? "חבילת ההחלטות מוכנה לבדיקת הצוות" : "החבילה חסומה; פירוט התיקונים מוצג", !ready);
     } catch (error) { toast(error.message, true); }
   });
@@ -1544,6 +1936,37 @@ function bindAgent() {
 function bindDecisionLog() {
   $("#decisionLogQuarter").addEventListener("change", () => renderDecisionLog(state.decisions || []));
   $("#decisionLogStatus").addEventListener("change", () => renderDecisionLog(state.decisions || []));
+  $("#createGovernanceSession").addEventListener("click", async event => {
+    event.currentTarget.disabled = true;
+    try {
+      const session = await api(`/api/governance/sessions/${encodeURIComponent(state.quarter)}`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({})});
+      state.governanceSessions = [session, ...(state.governanceSessions || [])];
+      renderGovernanceSession();
+      toast("ישיבת ההחלטה נפתחה עם Snapshot של הנתונים והסל המומלץ");
+    } catch (error) { toast(error.message, true); }
+    finally { event.currentTarget.disabled = false; }
+  });
+  $("#governanceVoteForm").addEventListener("submit", async event => {
+    event.preventDefault();
+    const session = (state.governanceSessions || [])[0];
+    if (!session) return;
+    try {
+      const updated = await api(`/api/governance/sessions/${encodeURIComponent(session.id)}/votes`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(formPayload(event.target))});
+      state.governanceSessions[0] = updated;
+      renderGovernanceSession();
+      toast("עמדת הצוות נשמרה");
+    } catch (error) { toast(error.message, true); }
+  });
+  $("#approveGovernanceSession").addEventListener("click", async () => {
+    const session = (state.governanceSessions || [])[0];
+    if (!session || !confirm("לאשר ולנעול את Snapshot הישיבה? הפעולה אינה שולחת החלטות ל־INTOPIA.")) return;
+    try {
+      const updated = await api(`/api/governance/sessions/${encodeURIComponent(session.id)}/approve`, {method:"POST"});
+      state.governanceSessions[0] = updated;
+      renderGovernanceSession();
+      toast("הישיבה אושרה וננעלה לתיעוד");
+    } catch (error) { toast(error.message, true); }
+  });
   $("#newDecisionButton").addEventListener("click", () => {
     $("#manualDecisionPanel").open = true;
     $("#decisionForm [name=title]").focus();
@@ -1606,6 +2029,7 @@ async function loadCurrentQuarter() {
       loadResearch(),
       loadSavedScenarios(),
       loadInsights(),
+      loadLearningLedger(),
       loadDecisionLog(),
       loadFinanceRange(),
     ]);

@@ -179,9 +179,16 @@ UUID_TABLES = {
     "document_chunks",
     "ai_runs",
     "recommendation_evidence",
+    "evidence_gate_runs",
     "forecasts",
+    "forecast_evaluations",
+    "calibration_proposals",
     "decision_packs",
     "optimization_runs",
+    "digital_twin_runs",
+    "market_intelligence_runs",
+    "decision_sessions",
+    "decision_votes",
 }
 
 

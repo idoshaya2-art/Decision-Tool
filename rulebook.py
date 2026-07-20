@@ -20,7 +20,7 @@ from intopia_rules import (
 )
 
 
-RULEBOOK_VERSION = "1.0.0"
+RULEBOOK_VERSION = "1.3.0"
 RULEBOOK_STATUS = "approved_baseline"
 
 AREA_ALIASES = {
@@ -722,6 +722,37 @@ def evaluate_action(
     grade = int(_number(action.get("grade"), -1))
     matching = _action_operations({**action, "area": area, "product": product}, operations)
 
+    # Values that may never be negative in an INTOPIA decision.  This check is
+    # intentionally performed before type-specific calculations so invalid
+    # inputs cannot be silently normalised with max(0, value).
+    nonnegative_fields = {
+        "units",
+        "price_lc",
+        "price_sf",
+        "advertising_lc",
+        "cost_sf",
+        "variable_cost_sf",
+        "amount_sf",
+        "final_payment_sf",
+        "interest_rate",
+        "plant_count",
+        "brazil_deposit_brl",
+        "available_x_units",
+        "available_inventory_units",
+    }
+    for field in sorted(nonnegative_fields):
+        if action.get(field) not in (None, "") and _number(action.get(field)) < 0:
+            checks.append(
+                RuleCheck(
+                    f"FORM-{code}" if catalog else "COURSE-RUN-SPECIFIC",
+                    "fail",
+                    f"השדה {field} אינו יכול להיות שלילי.",
+                    True,
+                    field,
+                    "הזינו ערך אפס או ערך חיובי בהתאם לטופס הרשמי.",
+                )
+            )
+
     if code and not catalog:
         checks.append(RuleCheck("COURSE-RUN-SPECIFIC", "fail", f"קוד החלטה לא מוכר: {code}.", True, "code", "בחרו טופס מהקטלוג הרשמי."))
     if catalog:
@@ -751,7 +782,9 @@ def evaluate_action(
                 )
 
     if action_type == "plant_construction":
-        plants = max(0.0, _number(action.get("plant_count"), 1))
+        plants = _number(action.get("plant_count"), 1)
+        if strict and plants <= 0:
+            checks.append(RuleCheck(f"FORM-{code}", "fail", "הקמת מפעל מחייבת מספר מפעלים גדול מאפס.", True, "plant_count", "הזינו לפחות מפעל אחד או הסירו את הפעולה מהחבילה."))
         existing = max((_number(row.get("plants")) for row in matching), default=0.0)
         if existing + plants > 3:
             checks.append(RuleCheck("UI-MAX-THREE-PLANTS", "fail", f"לאחר הפעולה יהיו {existing + plants:g} מפעלים; המקסימום הוא 3.", True, "plant_count", "הקטינו את מספר המפעלים או בחרו אזור אחר."))
@@ -763,8 +796,13 @@ def evaluate_action(
         checks.append(RuleCheck("DL-PLANT-LAG", "pass", "המפעל יוכל לייצר החל מהרבעון הבא."))
 
     if action_type == "production":
-        units = max(0.0, _number(action.get("units")))
+        units = _number(action.get("units"))
+        if strict and units <= 0:
+            checks.append(RuleCheck(f"FORM-{code}", "fail", "פעולת ייצור מחייבת כמות גדולה מאפס.", True, "units", "הזינו כמות ייצור חיובית או הסירו את הפעולה מהחבילה."))
         capacity = sum(_number(row.get("plant_capacity")) for row in matching)
+        capacity_known = any(row.get("plant_capacity") not in (None, "") for row in matching)
+        if strict and units > 0 and not capacity_known:
+            checks.append(RuleCheck("DL-PLANT-CAPACITY", "fail", "לא ניתן לאשר ייצור ללא נתון קיבולת מאושר לאזור, למוצר ולדגם.", True, "units", "אשרו את דוח הרבעון או השלימו את נתון הקיבולת לפני יצירת החבילה."))
         if capacity and units > capacity + 0.01:
             checks.append(RuleCheck("DL-PLANT-CAPACITY", "fail", f"הייצור המתוכנן {units:,.0f} גבוה מהקיבולת הזמינה {capacity:,.0f}.", True, "units", "הקטינו ייצור או הפעילו קיבולת חוקית שכבר נכנסה לתוקף."))
         if product == "Y":
@@ -774,9 +812,27 @@ def evaluate_action(
                 if required == 0:
                     checks.append(RuleCheck("DL-XY-COMPATIBILITY", "fail", f"X{x_grade} אינו תואם לייצור Y{grade}.", True, "x_grade", "בחרו רמת X תואמת לפי טבלת ההמרה."))
                 else:
-                    available_x = _number(action.get("available_x_units"), -1)
+                    explicit_available_x = action.get("available_x_units") not in (None, "")
+                    x_rows = [
+                        row
+                        for row in operations
+                        if normalize_area(row.get("area")) == area
+                        and str(row.get("product") or "") == "X"
+                        and (
+                            x_grade < 0
+                            or int(_number(row.get("grade"), -1)) == x_grade
+                        )
+                    ]
+                    x_inventory_known = any(row.get("ending_inventory") not in (None, "") for row in x_rows)
+                    available_x = (
+                        _number(action.get("available_x_units"))
+                        if explicit_available_x
+                        else sum(_number(row.get("ending_inventory")) for row in x_rows)
+                    )
                     required_x = units * required
-                    if available_x >= 0 and available_x + 0.01 < required_x:
+                    if strict and units > 0 and not explicit_available_x and not x_inventory_known:
+                        checks.append(RuleCheck("DL-XY-COMPATIBILITY", "fail", "לא ניתן לאשר ייצור Y ללא מלאי X מאושר וזמין בזמן.", True, "available_x_units", "אשרו מלאי X לפי רמה או הגדירו אספקת X חוקית לפני ייצור Y."))
+                    elif (explicit_available_x or x_inventory_known) and available_x + 0.01 < required_x:
                         checks.append(RuleCheck("DL-XY-COMPATIBILITY", "fail", f"נדרשות {required_x:,.0f} יחידות X{x_grade}, אך הוגדרו {available_x:,.0f}.", True, "available_x_units", "הקטינו ייצור Y או ספקו X תואם בזמן."))
             elif strict:
                 checks.append(RuleCheck("DL-XY-COMPATIBILITY", "fail", "ייצור Y מחייב ציון רמת X ורמת Y.", True, "x_grade,grade", "הגדירו את שתי הרמות."))
@@ -785,6 +841,8 @@ def evaluate_action(
 
     if action_type in {"price_advertising", "price_change"}:
         price = _number(action.get("price_lc"))
+        if price <= 0:
+            checks.append(RuleCheck(f"FORM-{code}" if code else "DL-PRICE-BASELINE", "fail", "מחיר מכירה חייב להיות גדול מאפס.", True, "price_lc", "הזינו מחיר חוקי וחיובי במטבע המקומי."))
         if product == "Y" and 0 <= grade <= 3 and price > 1400:
             checks.append(RuleCheck("DL-Y03-PRICE-CAP", "fail", f"מחיר {price:,.0f} חורג מתקרת 1,400 לרמות Y0–Y3.", True, "price_lc", "הורידו את המחיר ל-1,400 או פחות."))
         previous = _number(action.get("current_price_lc"))
@@ -796,6 +854,8 @@ def evaluate_action(
 
     if action_type == "rd":
         amount = max(_number(action.get("amount_sf")), _number(action.get("cost_sf")))
+        if strict and amount <= 0:
+            checks.append(RuleCheck(f"FORM-{code}", "fail", "פעולת מו״פ מחייבת השקעה חיובית.", True, "amount_sf", "הזינו השקעה חוקית או הסירו את הפעולה מהחבילה."))
         minimum = _number(MINIMUM_RD_SF.get(product))
         if amount > 0 and minimum and amount < minimum:
             checks.append(RuleCheck("DL-RD-MINIMUM", "fail", f"השקעת מו״פ ב-{product} חייבת להיות לפחות {minimum:,.0f} SF.", True, "amount_sf", f"הגדילו ל-{minimum:,.0f} SF לפחות או אל תשקיעו ברבעון זה."))
@@ -807,6 +867,21 @@ def evaluate_action(
         checks.append(RuleCheck("DL-AIRFREIGHT-SAME-Q", "fail", "לא ניתן לבצע הובלה אווירית שנייה לאותן יחידות באותו רבעון.", True, "second_airfreight", "השתמשו או מכרו ללא הובלה אווירית נוספת."))
 
     if action_type == "grade_license":
+        license_amount = max(
+            _number(action.get("amount_sf")),
+            _number(action.get("cost_sf")),
+        )
+        if strict and license_amount <= 0:
+            checks.append(
+                RuleCheck(
+                    f"FORM-{code}",
+                    "fail",
+                    "רישיון לרמה טכנולוגית מחייב תמורה חיובית.",
+                    True,
+                    "amount_sf",
+                    "הזינו סכום רישיון מאושר או הסירו את הפעולה.",
+                )
+            )
         duration = int(_number(action.get("license_quarters"), 0))
         if duration and duration < 2:
             checks.append(RuleCheck("DL-LICENSE-LAG", "fail", "תקופת רישיון מינימלית היא שני רבעונים.", True, "license_quarters", "הגדילו את התקופה לשני רבעונים לפחות."))
@@ -820,6 +895,128 @@ def evaluate_action(
         source_currency = str(action.get("currency") or "")
         if action_type == "local_currency_exchange" and local_currency and source_currency == local_currency:
             checks.append(RuleCheck(f"FORM-{code}" if code else "DL-FX-COMMISSION", "fail", f"לא ניתן למכור לבנק המקומי את המטבע המקומי {local_currency}.", True, "currency", "בחרו מטבע זר להמרה."))
+
+    positive_amount_types = {
+        "money_transfer",
+        "invest_borrow",
+        "currency_conversion",
+        "local_currency_exchange",
+        "home_office_finance",
+        "intercompany_loan",
+        "services_payment",
+    }
+    if strict and action_type in positive_amount_types and _number(action.get("amount_sf")) <= 0:
+        checks.append(RuleCheck(f"FORM-{code}", "fail", "הפעולה מחייבת סכום גדול מאפס.", True, "amount_sf", "הזינו סכום חיובי או הסירו את הפעולה מהחבילה."))
+
+    if action_type == "market_research":
+        raw_study_id = action.get("study_id")
+        study_id = int(_number(raw_study_id, -1))
+        if (
+            isinstance(raw_study_id, bool)
+            or study_id < 1
+            or study_id > 81
+            or str(raw_study_id).strip() not in {str(study_id), f"{study_id}.0"}
+        ):
+            checks.append(
+                RuleCheck(
+                    f"FORM-{code}",
+                    "fail",
+                    "מזהה מחקר השוק אינו חוקי; נדרש מספר מחקר רשמי 1–81.",
+                    True,
+                    "study_id",
+                    "בחרו את המחקר מתוך קטלוג מחקרי השוק המאושר.",
+                )
+            )
+        if strict and _number(action.get("cost_sf")) <= 0:
+            checks.append(
+                RuleCheck(
+                    f"FORM-{code}",
+                    "fail",
+                    "מחקר שוק מחייב עלות מאושרת גדולה מאפס.",
+                    True,
+                    "cost_sf",
+                    "טענו את העלות מהקטלוג המאושר לפני יצירת החבילה.",
+                )
+            )
+
+    if action_type == "intercompany_loan":
+        principal = _number(action.get("amount_sf"))
+        final_payment = _number(action.get("final_payment_sf"))
+        payment_quarter = _quarter_number(action.get("payment_quarter"))
+        if strict and final_payment <= 0:
+            checks.append(
+                RuleCheck(
+                    f"FORM-{code}",
+                    "fail",
+                    "הלוואה בין חברות מחייבת תשלום סופי חיובי.",
+                    True,
+                    "final_payment_sf",
+                    "הזינו את סכום הפירעון המלא לפי ההסכם.",
+                )
+            )
+        elif final_payment > 0 and principal > 0 and final_payment + 0.01 < principal:
+            checks.append(
+                RuleCheck(
+                    f"FORM-{code}",
+                    "fail",
+                    "התשלום הסופי נמוך מקרן ההלוואה.",
+                    True,
+                    "final_payment_sf",
+                    "הגדילו את התשלום הסופי לפחות לגובה הקרן או תקנו את סכום הקרן.",
+                )
+            )
+        if strict and (
+            payment_quarter <= _quarter_number(quarter)
+            or payment_quarter > 9
+        ):
+            checks.append(
+                RuleCheck(
+                    f"FORM-{code}",
+                    "fail",
+                    "רבעון הפירעון חייב להיות לאחר הרבעון הנוכחי ועד Q9.",
+                    True,
+                    "payment_quarter",
+                    "בחרו רבעון פירעון חוקי בטווח שנותר למשחק.",
+                )
+            )
+
+    # Outgoing stock decisions must be backed by approved ending inventory.
+    if action_type in {"component_transfer", "industrial_sale"}:
+        units = _number(action.get("units"))
+        explicit_inventory = action.get("available_inventory_units") not in (None, "")
+        inventory_rows = [
+            row
+            for row in matching
+            if grade < 0 or int(_number(row.get("grade"), -1)) == grade
+        ]
+        inventory_known = any(row.get("ending_inventory") not in (None, "") for row in inventory_rows)
+        available_inventory = (
+            _number(action.get("available_inventory_units"))
+            if explicit_inventory
+            else sum(_number(row.get("ending_inventory")) for row in inventory_rows)
+        )
+        if strict and units <= 0:
+            checks.append(RuleCheck(f"FORM-{code}", "fail", "מכירה או העברה מחייבת כמות גדולה מאפס.", True, "units", "הזינו כמות חיובית או הסירו את הפעולה מהחבילה."))
+        if strict and units > 0 and not explicit_inventory and not inventory_known:
+            checks.append(RuleCheck("DL-INVENTORY-CARRYING", "fail", "לא ניתן לאשר מכירה או העברה ללא מלאי סופי מאושר.", True, "available_inventory_units", "אשרו את דוח המלאי או הגדירו מלאי זמין ממקור מאושר."))
+        elif units > available_inventory + 0.01:
+            checks.append(RuleCheck("DL-INVENTORY-CARRYING", "fail", f"הפעולה דורשת {units:,.0f} יחידות אך זמינות רק {available_inventory:,.0f}.", True, "units", f"הקטינו את הכמות ל-{available_inventory:,.0f} לכל היותר או הבטיחו אספקה חוקית מוקדמת יותר."))
+
+    if action_type == "industrial_sale" and _number(action.get("price_lc")) <= 0:
+        checks.append(RuleCheck(f"FORM-{code}", "fail", "מכירה תעשייתית מחייבת מחיר חיובי.", True, "price_lc", "הזינו מחיר עסקה חיובי במטבע המקומי."))
+
+    if action_type == "factory_sale":
+        plants = _number(action.get("plant_count"), 1)
+        existing_plants = max((_number(row.get("plants")) for row in matching), default=0.0)
+        plants_known = any(row.get("plants") not in (None, "") for row in matching)
+        if strict and plants <= 0:
+            checks.append(RuleCheck(f"FORM-{code}", "fail", "מכירת מפעל מחייבת מספר מפעלים גדול מאפס.", True, "plant_count", "הזינו לפחות מפעל אחד או הסירו את הפעולה."))
+        if strict and plants > 0 and not plants_known:
+            checks.append(RuleCheck("UI-MAX-THREE-PLANTS", "fail", "לא ניתן לאשר מכירת מפעל ללא מצב מפעלים מאושר.", True, "plant_count", "אשרו את מצב המפעלים בדוח הרבעוני."))
+        elif plants > existing_plants + 0.01:
+            checks.append(RuleCheck("UI-MAX-THREE-PLANTS", "fail", f"נבחרה מכירה של {plants:g} מפעלים אך קיימים רק {existing_plants:g}.", True, "plant_count", f"הקטינו את המכירה ל-{existing_plants:g} מפעלים לכל היותר."))
+        if _number(action.get("price_lc")) <= 0:
+            checks.append(RuleCheck(f"FORM-{code}", "fail", "מכירת מפעל מחייבת מחיר חיובי.", True, "price_lc", "הזינו מחיר עסקה חיובי במטבע המקומי."))
 
     return [check.as_dict() for check in checks]
 
@@ -840,6 +1037,17 @@ def evaluate_portfolio(
         for action in actions
         for check in evaluate_action(action, quarter=quarter, operations=operations, strict=strict)
     ]
+    if strict and not actions:
+        checks.append(
+            RuleCheck(
+                "COURSE-RUN-SPECIFIC",
+                "fail",
+                "חבילת החלטות ריקה אינה מוכנה להגשה.",
+                True,
+                "actions",
+                "הוסיפו לפחות פעולה אחת שנבדקה ואושרה.",
+            ).as_dict()
+        )
     total_cost = sum(max(0.0, _number(action.get("cost_sf"))) for action in actions)
     total_cost += sum(
         max(0.0, _number(action.get("brazil_deposit_brl"))) * BASELINE_FX_TO_SF["Brazil"]
@@ -895,15 +1103,34 @@ def evaluate_portfolio(
             ).as_dict()
         )
     blocking = [check for check in checks if check.get("blocking") and check.get("status") == "fail"]
+    advisory = [check for check in checks if not check.get("blocking") and check.get("status") != "pass"]
     applied = sorted(
         {check.get("rule_id") for check in checks if check.get("rule_id")},
     )
+    readiness_status = "blocked" if blocking else ("conditional" if advisory else "ready")
     return {
         "rulebook_version": RULEBOOK_VERSION,
         "feasible": not blocking,
         "checks": checks,
         "violations": blocking,
         "warnings": [check for check in checks if not check.get("blocking")],
+        "readiness": {
+            "status": readiness_status,
+            "label": {
+                "ready": "מוכן להגשה",
+                "conditional": "מוכן בכפוף לתיקונים",
+                "blocked": "חסום",
+            }[readiness_status],
+            "blocking_count": len(blocking),
+            "warning_count": len(advisory),
+            "required_fixes": list(
+                dict.fromkeys(
+                    str(check.get("remediation") or check.get("message") or "")
+                    for check in blocking
+                    if check.get("remediation") or check.get("message")
+                )
+            ),
+        },
         "applied_rules": [rule_citation(RULE_INDEX[rule_id]) for rule_id in applied if rule_id in RULE_INDEX],
         "budget": {
             "available_sf": round(available_budget_sf, 2),

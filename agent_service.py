@@ -33,6 +33,14 @@ Never assess an important decision in isolation: identify prerequisite decisions
 timing dependencies, X-to-Y supply dependencies, decisions that must be coordinated, and conflicts.
 State the executable order, explain which action unlocks another, and evaluate the combined portfolio
 against both immediate performance and the Q9 strategy.
+Before explaining the short- and long-term impact of a decision portfolio, call get_digital_twin.
+Use its approved baseline and quarter-by-quarter transitions to distinguish immediate cash cost,
+effective quarter, receivables collection, inventory, capacity, debt and technology effects. Never
+describe a scenario state as an Actual and explicitly say that simulation does not mutate Actuals.
+Before quoting or recommending any action number, call get_evidence_gate. A numeric action marked
+blocked must not be presented as executable. A conditional number must be labelled as an assumption
+and accompanied by its source, formula, range, confidence and the exact missing evidence. Never turn
+a forecast, a generic heuristic or a model default into an observed fact.
 When the recommendation tool returns an execution_blueprint, use it as the primary operational answer.
 Quote the INTOPIA form code, field, exact recommended value and unit, gate, predecessor step, expected
 result, confidence and source. Distinguish "ready to enter", "conditional", and "blocked". Never skip a
@@ -45,6 +53,20 @@ action review marks blocked, and never imply that an unreviewed form was conside
 For market-research questions, use the exact values returned by the research and cumulative-insight
 tools, cite the quarter and MR number, separate an observed result from your inference, and explain
 which decision the result changes. Never infer a trend from a report that contains zero observations.
+Before recommending a new market study or applying an inferred elasticity, call get_market_intelligence.
+Use its decision map, sufficiency gate and Value-of-Information result. Never quote a monetary VOI when
+the tool marks it qualitative_only, and never use an elasticity marked insufficient_observations.
+Before recommending the final cross-functional action basket, call get_q9_optimization. Use the winning
+basket only when it is feasible, explain its exact execution sequence, budget and downside range, and
+report whether the winner remains stable under the 40/60, 50/50 and 60/40 score-weight sensitivity tests.
+Do not optimize marketing, production, finance or strategy in isolation when their actions share cash,
+timing, capacity, X-to-Y supply or evidence dependencies.
+Before saying that a decision is approved by the group, call get_group_decision_status. Distinguish a
+system recommendation from a team-approved, locked session. Preserve dissent and identify missing roles
+or failed machine controls. Never claim that a team approval was submitted to INTOPIA.
+Before making a forecast-sensitive recommendation, call get_learning_ledger. State what the model
+previously over- or under-estimated, the diagnosed drivers, forecast accuracy, and whether a calibration
+is approved or still a draft. Never apply a draft calibration and never rewrite a historical forecast.
 For document or rule questions, search the uploaded source excerpts as well as the approved Rulebook.
 An uploaded excerpt is evidence, but it is not an approved rule until the team resolves the candidate
 and a new Rulebook version is activated.
@@ -87,9 +109,31 @@ TOOLS = [
     },
     {
         "type": "function",
+        "name": "get_digital_twin",
+        "description": "Get the locked approved baseline and recent quarter-by-quarter Digital Twin simulations through Q9.",
+        "parameters": {"type": "object", "properties": {"quarter": {"type": "string"}}, "required": ["quarter"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
         "name": "get_recommendations",
         "description": "Get the full four-category form audit followed by the highest priority recommendations, dependencies, conflicts and executable sequence based on approved data, rules, research and budget.",
         "parameters": {"type": "object", "properties": {"quarter": {"type": "string"}}, "required": ["quarter"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_evidence_gate",
+        "description": "Audit every recommendation number and return source, formula, range, confidence, contradictions and missing evidence.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "quarter": {"type": "string"},
+                "recommendation_key": {"type": "string"},
+            },
+            "required": ["quarter", "recommendation_key"],
+            "additionalProperties": False,
+        },
         "strict": True,
     },
     {
@@ -106,8 +150,36 @@ TOOLS = [
     },
     {
         "type": "function",
+        "name": "get_market_intelligence",
+        "description": "Map approved market research to decision variables, test whether observations support calibration, and rank up to three additional studies by Value of Information.",
+        "parameters": {"type": "object", "properties": {"quarter": {"type": "string"}}, "required": ["quarter"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_q9_optimization",
+        "description": "Get the deterministic integrated Q9 action-basket optimization, Pareto alternatives, budget, dependencies, downside and 40/60 to 60/40 weight sensitivity.",
+        "parameters": {"type": "object", "properties": {"quarter": {"type": "string"}}, "required": ["quarter"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_group_decision_status",
+        "description": "Get the latest group decision session, role votes, dissent and machine approval gate for the selected quarter.",
+        "parameters": {"type": "object", "properties": {"quarter": {"type": "string"}}, "required": ["quarter"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
         "name": "get_cumulative_insights",
         "description": "Get cumulative financial, pricing, competitor and cross-market-research trends through a quarter.",
+        "parameters": {"type": "object", "properties": {"quarter": {"type": "string"}}, "required": ["quarter"], "additionalProperties": False},
+        "strict": True,
+    },
+    {
+        "type": "function",
+        "name": "get_learning_ledger",
+        "description": "Get immutable forecast snapshots, Forecast-to-Actual errors, diagnosed drivers and human-reviewed calibration status through a quarter.",
         "parameters": {"type": "object", "properties": {"quarter": {"type": "string"}}, "required": ["quarter"], "additionalProperties": False},
         "strict": True,
     },

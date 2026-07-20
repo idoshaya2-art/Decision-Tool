@@ -2,6 +2,29 @@
 
 ## א. Supabase
 
+### מערכת v1.6 קיימת — השדרוג הנוכחי ל־v1.9
+
+1. הורידו גיבוי מלא מהאפליקציה לפני השדרוג.
+2. פתחו **SQL Editor → New query**.
+3. העתיקו והריצו פעם אחת את `supabase/migration_v1.7_market_intelligence.sql`.
+4. לאחר שהסתיים בהצלחה, העתיקו והריצו פעם אחת את `supabase/migration_v1.9_group_governance.sql`.
+5. ודאו שנוצרו `market_intelligence_runs`, `decision_sessions` ו־`decision_votes`.
+6. אין מיגרציה נפרדת ל־v1.8; האופטימיזציה משתמשת בטבלת `optimization_runs` הקיימת.
+7. הסקריפטים מוסיפים טבלאות בלבד ואינם מוחקים Actuals, דוחות או קבצים.
+
+### מערכת ישנה מ־v1.6
+
+לאחר גיבוי, הריצו לפי הסדר ורק את המיגרציות שטרם הורצו:
+
+```text
+supabase/migration_v1.0.sql
+supabase/migration_v1.4_learning.sql
+supabase/migration_v1.5_evidence_gate.sql
+supabase/migration_v1.6_digital_twin.sql
+supabase/migration_v1.7_market_intelligence.sql
+supabase/migration_v1.9_group_governance.sql
+```
+
 ### מערכת חדשה
 
 1. צרו פרויקט ב־Supabase ושמרו את סיסמת מסד הנתונים במקום בטוח.
@@ -15,7 +38,7 @@
 2. הריצו רק את `supabase/migration_v0.5.sql`.
 3. הסקריפט מוסיף טבלאות ושדות; הוא אינו מוחק נתוני חברה.
 
-### מערכת v0.5 קיימת — השדרוג הנוכחי
+### מערכת v0.5 קיימת
 
 1. הורידו גיבוי מלא מהאפליקציה.
 2. הריצו פעם אחת את `supabase/migration_v0.6.sql` ב־SQL Editor.
@@ -111,6 +134,8 @@ OPENAI_MAX_OUTPUT_TOKENS=2400
 4. שמרו הגדרה, העלו קובץ קטן, סגרו ופתחו שוב.
 5. ב־Render בצעו **Manual Deploy → Deploy latest commit**. ודאו שהנתון והקובץ נשארו.
 6. ודאו ב־Supabase שהרשומה קיימת ב־Table Editor והקובץ ב־Storage.
+7. פתחו `/api/q9-optimization/Q4/runs` וודאו שה־API מחזיר תשובה תקינה.
+8. צרו ישיבת החלטה בלוג, הצביעו מתפקיד אחד, רעננו את הדף וודאו שההצבעה נשמרה.
 
 ## ה. בדיקת Decision Agent
 
@@ -138,8 +163,9 @@ https://YOUR-SERVICE.onrender.com/api/agent/status
 2. בחרו זיהוי אוטומטי, העלו ואשרו בנפרד Q1, Q2 ו־Q3.
 3. בחרו Q4 בחלק העליון.
 4. בדקו מצב כספי, תחזית Q9 והמלצות.
-5. הריצו תרחישים לפני החלטות.
-6. הורידו גיבוי מלא.
+5. הריצו את אופטימיזציית Q9 ובדקו את הסל המנצח ואת רגישות המשקלים.
+6. פתחו ישיבת החלטה, השלימו הצבעות ואשרו רק לאחר שכל הבקרות עברו.
+7. הורידו גיבוי מלא.
 
 ## תקלות נפוצות
 

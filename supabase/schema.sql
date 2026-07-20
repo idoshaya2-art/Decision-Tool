@@ -442,9 +442,31 @@ create table if not exists public.ai_runs (
 );
 create table if not exists public.forecasts (
     id uuid primary key default gen_random_uuid(), quarter text not null,
+    source_actual_quarter text not null default '', target_quarter text not null default '',
     forecast_type text not null default 'q9', rulebook_version text not null references public.rulebook_versions(version),
     assumptions jsonb not null default '[]'::jsonb, result jsonb not null default '{}'::jsonb,
-    confidence text not null default 'medium', created_at timestamptz not null default now()
+    confidence text not null default 'medium', status text not null default 'open',
+    created_at timestamptz not null default now()
+);
+create table if not exists public.forecast_evaluations (
+    id uuid primary key default gen_random_uuid(),
+    forecast_id uuid not null references public.forecasts(id) on delete cascade,
+    source_actual_quarter text not null default '', target_quarter text not null,
+    status text not null default 'evaluated', summary jsonb not null default '{}'::jsonb,
+    metric_errors jsonb not null default '{}'::jsonb, driver_analysis jsonb not null default '[]'::jsonb,
+    actual_snapshot jsonb not null default '{}'::jsonb,
+    evaluated_at timestamptz not null default now(), created_at timestamptz not null default now(),
+    unique (forecast_id)
+);
+create table if not exists public.calibration_proposals (
+    id uuid primary key default gen_random_uuid(),
+    evaluation_id uuid not null references public.forecast_evaluations(id) on delete cascade,
+    parameter_key text not null, metric_key text not null default '', scope jsonb not null default '{"level":"global"}'::jsonb,
+    previous_value numeric not null default 1, proposed_value numeric not null default 1,
+    confidence text not null default 'low', status text not null default 'draft',
+    reason text not null default '', evidence jsonb not null default '{}'::jsonb,
+    reviewed_by text not null default '', approved_at timestamptz,
+    created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
 create table if not exists public.decision_packs (
     id uuid primary key default gen_random_uuid(), quarter text not null, name text not null,
@@ -462,6 +484,14 @@ create table if not exists public.recommendation_evidence (
     source_page text not null default '', rule_id text not null default '',
     payload jsonb not null default '{}'::jsonb, created_at timestamptz not null default now()
 );
+create table if not exists public.evidence_gate_runs (
+    id uuid primary key default gen_random_uuid(),
+    quarter text not null, decision_pack_id uuid references public.decision_packs(id) on delete cascade,
+    recommendation_key text not null default '', status text not null default 'blocked',
+    score numeric not null default 0, summary jsonb not null default '{}'::jsonb,
+    claims jsonb not null default '[]'::jsonb, gaps jsonb not null default '[]'::jsonb,
+    contradictions jsonb not null default '[]'::jsonb, created_at timestamptz not null default now()
+);
 create table if not exists public.optimization_runs (
     id uuid primary key default gen_random_uuid(), quarter text not null,
     optimization_type text not null default 'budget',
@@ -469,18 +499,67 @@ create table if not exists public.optimization_runs (
     constraints jsonb not null default '{}'::jsonb, candidates jsonb not null default '[]'::jsonb,
     result jsonb not null default '{}'::jsonb, created_at timestamptz not null default now()
 );
+create table if not exists public.digital_twin_snapshots (
+    quarter text not null, as_of_quarter text not null default 'none',
+    source_type text not null default 'approved_actual', state jsonb not null default '{}'::jsonb,
+    locked boolean not null default true, rulebook_version text not null default '',
+    created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+    primary key (quarter, as_of_quarter, source_type)
+);
+create table if not exists public.digital_twin_runs (
+    id uuid primary key default gen_random_uuid(), quarter text not null,
+    scenario_name text not null default '', baseline_as_of text,
+    actions jsonb not null default '[]'::jsonb, assumptions jsonb not null default '[]'::jsonb,
+    result jsonb not null default '{}'::jsonb, feasible boolean not null default false,
+    rulebook_version text not null default '', created_at timestamptz not null default now()
+);
+create table if not exists public.market_intelligence_runs (
+    id uuid primary key default gen_random_uuid(), quarter text not null,
+    result jsonb not null default '{}'::jsonb, input_fingerprint text not null default '',
+    created_at timestamptz not null default now()
+);
+create table if not exists public.decision_sessions (
+    id uuid primary key default gen_random_uuid(), quarter text not null, name text not null,
+    status text not null default 'draft',
+    decision_pack_id uuid references public.decision_packs(id) on delete set null,
+    optimization_run_id uuid references public.optimization_runs(id) on delete set null,
+    rulebook_version text not null references public.rulebook_versions(version),
+    snapshot jsonb not null default '{}'::jsonb, validation jsonb not null default '{}'::jsonb,
+    facilitator text not null default '', approved_by jsonb not null default '[]'::jsonb,
+    approved_at timestamptz, locked boolean not null default false,
+    created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create table if not exists public.decision_votes (
+    id uuid primary key default gen_random_uuid(),
+    session_id uuid not null references public.decision_sessions(id) on delete cascade,
+    role text not null, voter_name text not null, vote text not null,
+    rationale text not null default '', concerns jsonb not null default '[]'::jsonb,
+    created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+    unique (session_id, role)
+);
 
 create index if not exists rules_domain_idx on public.rules (domain, knowledge_type);
 create index if not exists rule_conflicts_status_idx on public.rule_conflicts (status, created_at desc);
 create index if not exists ai_runs_quarter_idx on public.ai_runs (quarter, created_at desc);
+create index if not exists forecasts_target_idx on public.forecasts (target_quarter, status, created_at desc);
+create index if not exists forecast_evaluations_target_idx on public.forecast_evaluations (target_quarter, evaluated_at desc);
+create index if not exists calibration_proposals_status_idx on public.calibration_proposals (status, created_at desc);
 create index if not exists decision_packs_quarter_idx on public.decision_packs (quarter, created_at desc);
+create index if not exists evidence_gate_runs_quarter_idx on public.evidence_gate_runs (quarter, created_at desc);
+create index if not exists digital_twin_runs_quarter_idx on public.digital_twin_runs (quarter, created_at desc);
+create index if not exists market_intelligence_runs_quarter_idx on public.market_intelligence_runs (quarter, created_at desc);
+create index if not exists decision_sessions_quarter_idx on public.decision_sessions (quarter, created_at desc);
+create index if not exists decision_votes_session_idx on public.decision_votes (session_id, updated_at);
 
 do $$
 declare table_name text;
 begin
   foreach table_name in array array[
     'rule_sources', 'rulebook_versions', 'rules', 'rule_conflicts', 'document_chunks',
-    'ai_runs', 'forecasts', 'decision_packs', 'recommendation_evidence', 'optimization_runs'
+    'ai_runs', 'forecasts', 'forecast_evaluations', 'calibration_proposals',
+    'decision_packs', 'recommendation_evidence', 'evidence_gate_runs', 'optimization_runs',
+    'digital_twin_snapshots', 'digital_twin_runs', 'market_intelligence_runs',
+    'decision_sessions', 'decision_votes'
   ]
   loop
     execute format('alter table public.%I enable row level security', table_name);

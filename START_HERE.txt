@@ -1,12 +1,12 @@
-EMBA TAU Simulation AI Decision OS v1.0 — START HERE
+EMBA TAU Simulation AI Decision OS v1.9 — START HERE
 
 שדרוג מהמערכת שכבר פועלת:
 1. הורידו גיבוי מלא מהאפליקציה הקיימת.
-2. פתחו DEPLOY_v1.0_STEP_BY_STEP_HE.md.
-3. הריצו פעם אחת ב-Supabase את supabase/migration_v1.0.sql.
-4. החליפו ב-GitHub את קובצי האפליקציה בגרסת v1.0.
+2. פתחו DEPLOYMENT_CHECKLIST_HE.md.
+3. אם המערכת כבר ב-v1.6, הריצו ב-Supabase לפי הסדר את supabase/migration_v1.7_market_intelligence.sql ואז supabase/migration_v1.9_group_governance.sql. בהתקנה ישנה יותר יש להריץ גם את המיגרציות הקודמות לפי הסדר המופיע במדריך.
+4. החליפו ב-GitHub את קובצי האפליקציה בגרסת v1.9.
 5. ב-Render ודאו OPENAI_AGENT_ENABLED=true והזינו OPENAI_API_KEY כסוד.
-6. בצעו Deploy latest commit ובדקו /api/health וגם /api/rulebook.
+6. בצעו Deploy latest commit ובדקו /api/health, /api/rulebook, /api/digital-twin/Q4 וגם /api/q9-optimization/Q4/runs.
 
 התקנה חדשה:
 1. הריצו ב-Supabase את supabase/schema.sql.

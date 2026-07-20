@@ -41,9 +41,17 @@ TABLES = [
     "document_chunks",
     "ai_runs",
     "recommendation_evidence",
+    "evidence_gate_runs",
     "forecasts",
+    "forecast_evaluations",
+    "calibration_proposals",
     "decision_packs",
     "optimization_runs",
+    "digital_twin_snapshots",
+    "digital_twin_runs",
+    "market_intelligence_runs",
+    "decision_sessions",
+    "decision_votes",
 ]
 
 CONFLICT_COLUMNS = {
@@ -77,9 +85,17 @@ CONFLICT_COLUMNS = {
     "document_chunks": "id",
     "ai_runs": "id",
     "recommendation_evidence": "id",
+    "evidence_gate_runs": "id",
     "forecasts": "id",
+    "forecast_evaluations": "id",
+    "calibration_proposals": "id",
     "decision_packs": "id",
     "optimization_runs": "id",
+    "digital_twin_snapshots": "quarter,as_of_quarter,source_type",
+    "digital_twin_runs": "id",
+    "market_intelligence_runs": "id",
+    "decision_sessions": "id",
+    "decision_votes": "session_id,role",
 }
 
 KEY_COLUMNS = {
@@ -87,7 +103,15 @@ KEY_COLUMNS = {
 }
 
 COMPANY_TABLES_DELETE_ORDER = [
+    "decision_votes",
+    "decision_sessions",
+    "market_intelligence_runs",
+    "digital_twin_runs",
+    "digital_twin_snapshots",
+    "evidence_gate_runs",
     "recommendation_evidence",
+    "calibration_proposals",
+    "forecast_evaluations",
     "optimization_runs",
     "decision_packs",
     "forecasts",
@@ -116,7 +140,15 @@ COMPANY_TABLES_DELETE_ORDER = [
 ]
 
 ALL_TABLES_DELETE_ORDER = [
+    "decision_votes",
+    "decision_sessions",
+    "market_intelligence_runs",
+    "digital_twin_runs",
+    "digital_twin_snapshots",
+    "evidence_gate_runs",
     "recommendation_evidence",
+    "calibration_proposals",
+    "forecast_evaluations",
     "optimization_runs",
     "decision_packs",
     "forecasts",
@@ -754,14 +786,124 @@ def add_forecast(payload: dict[str, Any]) -> dict[str, Any]:
         "forecasts",
         {
             "quarter": payload.get("quarter", "Q4"),
+            "source_actual_quarter": payload.get("source_actual_quarter", ""),
+            "target_quarter": payload.get("target_quarter", payload.get("quarter", "Q4")),
             "forecast_type": payload.get("forecast_type", "q9"),
             "rulebook_version": payload.get("rulebook_version", RULEBOOK_VERSION),
             "assumptions": payload.get("assumptions", []),
             "result": payload.get("result", {}),
             "confidence": payload.get("confidence", "medium"),
+            "status": payload.get("status", "open"),
             "created_at": utc_now(),
         },
     )
+
+
+def list_forecasts(
+    quarter: str | None = None,
+    target_quarter: str | None = None,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    filters = {
+        key: value
+        for key, value in {
+            "quarter": quarter,
+            "target_quarter": target_quarter,
+            "status": status,
+        }.items()
+        if value
+    }
+    return _store().select("forecasts", filters or None, order="created_at", descending=True)
+
+
+def get_forecast(forecast_id: str) -> dict[str, Any]:
+    return _first(_store().select("forecasts", {"id": forecast_id}, limit=1))
+
+
+def update_forecast(forecast_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    values = {key: value for key, value in payload.items() if key in {
+        "status", "confidence", "result", "assumptions", "source_actual_quarter", "target_quarter"
+    }}
+    result = _first(_store().update("forecasts", {"id": forecast_id}, values))
+    if not result:
+        raise KeyError("forecast not found")
+    return result
+
+
+def add_forecast_evaluation(payload: dict[str, Any]) -> dict[str, Any]:
+    existing = _first(_store().select("forecast_evaluations", {"forecast_id": payload.get("forecast_id")}, limit=1))
+    values = {
+        "forecast_id": payload.get("forecast_id"),
+        "source_actual_quarter": payload.get("source_actual_quarter", ""),
+        "target_quarter": payload.get("target_quarter", ""),
+        "status": payload.get("status", "evaluated"),
+        "summary": payload.get("summary", {}),
+        "metric_errors": payload.get("metric_errors", {}),
+        "driver_analysis": payload.get("driver_analysis", []),
+        "actual_snapshot": payload.get("actual_snapshot", {}),
+        "evaluated_at": payload.get("evaluated_at", utc_now()),
+        "created_at": existing.get("created_at", utc_now()),
+    }
+    if existing.get("id"):
+        result = _first(_store().update("forecast_evaluations", {"id": existing["id"]}, values))
+    else:
+        result = _store().insert("forecast_evaluations", values)
+    audit("evaluate", "forecast_evaluations", str(result.get("id", "")), {"forecast_id": values["forecast_id"], "target_quarter": values["target_quarter"]})
+    return result
+
+
+def list_forecast_evaluations(quarter: str | None = None) -> list[dict[str, Any]]:
+    filters = {"target_quarter": quarter} if quarter else None
+    return _store().select("forecast_evaluations", filters, order="evaluated_at", descending=True)
+
+
+def add_calibration_proposal(payload: dict[str, Any]) -> dict[str, Any]:
+    now = utc_now()
+    return _store().insert(
+        "calibration_proposals",
+        {
+            "evaluation_id": payload.get("evaluation_id"),
+            "parameter_key": payload.get("parameter_key", ""),
+            "metric_key": payload.get("metric_key", ""),
+            "scope": payload.get("scope", {"level": "global"}),
+            "previous_value": payload.get("previous_value", 1.0),
+            "proposed_value": payload.get("proposed_value", 1.0),
+            "confidence": payload.get("confidence", "low"),
+            "status": payload.get("status", "draft"),
+            "reason": payload.get("reason", ""),
+            "evidence": payload.get("evidence", {}),
+            "reviewed_by": payload.get("reviewed_by", ""),
+            "approved_at": payload.get("approved_at"),
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+
+
+def list_calibration_proposals(status: str | None = None) -> list[dict[str, Any]]:
+    return _store().select(
+        "calibration_proposals",
+        {"status": status} if status else None,
+        order="created_at",
+        descending=True,
+    )
+
+
+def update_calibration_proposal(proposal_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    status = str(payload.get("status") or "")
+    if status not in {"draft", "approved", "rejected"}:
+        raise ValueError("status must be draft, approved or rejected")
+    values = {
+        "status": status,
+        "reviewed_by": payload.get("reviewed_by", "team"),
+        "approved_at": utc_now() if status == "approved" else None,
+        "updated_at": utc_now(),
+    }
+    result = _first(_store().update("calibration_proposals", {"id": proposal_id}, values))
+    if not result:
+        raise KeyError("calibration proposal not found")
+    audit("review", "calibration_proposals", proposal_id, {"status": status, "parameter_key": result.get("parameter_key")})
+    return result
 
 
 def add_decision_pack(payload: dict[str, Any]) -> dict[str, Any]:
@@ -818,6 +960,43 @@ def list_recommendation_evidence(decision_pack_id: str) -> list[dict[str, Any]]:
     )
 
 
+def add_evidence_gate_run(payload: dict[str, Any]) -> dict[str, Any]:
+    result = _store().insert(
+        "evidence_gate_runs",
+        {
+            "quarter": payload.get("quarter", "Q4"),
+            "decision_pack_id": payload.get("decision_pack_id"),
+            "recommendation_key": payload.get("recommendation_key", ""),
+            "status": payload.get("status", "blocked"),
+            "score": payload.get("score", 0),
+            "summary": payload.get("summary", {}),
+            "claims": payload.get("claims", []),
+            "gaps": payload.get("gaps", []),
+            "contradictions": payload.get("contradictions", []),
+            "created_at": utc_now(),
+        },
+    )
+    audit(
+        "create",
+        "evidence_gate_runs",
+        str(result.get("id") or ""),
+        {"quarter": result.get("quarter"), "status": result.get("status")},
+    )
+    return result
+
+
+def list_evidence_gate_runs(
+    quarter: str | None = None,
+    recommendation_key: str | None = None,
+) -> list[dict[str, Any]]:
+    filters: dict[str, Any] = {}
+    if quarter:
+        filters["quarter"] = quarter
+    if recommendation_key:
+        filters["recommendation_key"] = recommendation_key
+    return _store().select("evidence_gate_runs", filters or None, order="created_at", descending=True)
+
+
 def update_decision_pack(pack_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     values = {key: value for key, value in payload.items() if key in {
         "name", "status", "actions", "validation", "financial_impact", "q9_impact", "recommendation"
@@ -842,6 +1021,190 @@ def add_optimization_run(payload: dict[str, Any]) -> dict[str, Any]:
             "result": payload.get("result", {}),
             "created_at": utc_now(),
         },
+    )
+
+
+def list_optimization_runs(
+    quarter: str | None = None,
+    optimization_type: str | None = None,
+) -> list[dict[str, Any]]:
+    filters: dict[str, Any] = {}
+    if quarter:
+        filters["quarter"] = quarter
+    if optimization_type:
+        filters["optimization_type"] = optimization_type
+    return _store().select("optimization_runs", filters or None, order="created_at", descending=True)
+
+
+def add_decision_session(payload: dict[str, Any]) -> dict[str, Any]:
+    now = utc_now()
+    result = _store().insert(
+        "decision_sessions",
+        {
+            "quarter": payload.get("quarter", "Q4"),
+            "name": payload.get("name", "Team decision session"),
+            "status": payload.get("status", "draft"),
+            "decision_pack_id": payload.get("decision_pack_id"),
+            "optimization_run_id": payload.get("optimization_run_id"),
+            "rulebook_version": payload.get("rulebook_version", RULEBOOK_VERSION),
+            "snapshot": payload.get("snapshot", {}),
+            "validation": payload.get("validation", {}),
+            "facilitator": payload.get("facilitator", ""),
+            "approved_by": payload.get("approved_by", []),
+            "approved_at": payload.get("approved_at"),
+            "locked": bool(payload.get("locked", False)),
+            "created_at": now,
+            "updated_at": now,
+        },
+    )
+    audit("create", "decision_sessions", str(result.get("id") or ""), {"quarter": result.get("quarter")})
+    return result
+
+
+def list_decision_sessions(quarter: str | None = None) -> list[dict[str, Any]]:
+    return _store().select(
+        "decision_sessions",
+        {"quarter": quarter} if quarter else None,
+        order="created_at",
+        descending=True,
+    )
+
+
+def get_decision_session(session_id: str) -> dict[str, Any]:
+    return _first(_store().select("decision_sessions", {"id": session_id}, limit=1))
+
+
+def update_decision_session(session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    current = get_decision_session(session_id)
+    if not current:
+        raise KeyError("decision session not found")
+    if current.get("locked") and any(key not in {"status"} for key in payload):
+        raise ValueError("approved decision session is locked")
+    allowed = {"status", "validation", "approved_by", "approved_at", "locked", "facilitator"}
+    values = {key: value for key, value in payload.items() if key in allowed}
+    values["updated_at"] = utc_now()
+    result = _first(_store().update("decision_sessions", {"id": session_id}, values))
+    audit("update", "decision_sessions", session_id, {"status": result.get("status")})
+    return result
+
+
+def upsert_decision_vote(payload: dict[str, Any]) -> dict[str, Any]:
+    now = utc_now()
+    values = {
+        "session_id": payload.get("session_id"),
+        "role": payload.get("role", ""),
+        "voter_name": payload.get("voter_name", ""),
+        "vote": payload.get("vote", "abstain"),
+        "rationale": payload.get("rationale", ""),
+        "concerns": payload.get("concerns", []),
+        "created_at": payload.get("created_at") or now,
+        "updated_at": now,
+    }
+    result = _first(_store().upsert("decision_votes", values, "session_id,role"))
+    audit("vote", "decision_votes", str(result.get("id") or ""), {"session_id": result.get("session_id"), "role": result.get("role"), "vote": result.get("vote")})
+    return result
+
+
+def list_decision_votes(session_id: str) -> list[dict[str, Any]]:
+    return _store().select("decision_votes", {"session_id": session_id}, order="updated_at")
+
+
+def upsert_digital_twin_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    quarter = str(payload.get("quarter") or "")
+    if quarter not in QUARTERS:
+        raise ValueError("Invalid quarter")
+    now = utc_now()
+    source_type = payload.get("source_type", "approved_actual")
+    as_of_quarter = str(payload.get("as_of_quarter") or "none")
+    existing = _store().select(
+        "digital_twin_snapshots",
+        {"quarter": quarter, "as_of_quarter": as_of_quarter, "source_type": source_type},
+        limit=1,
+    )
+    values = {
+        "quarter": quarter,
+        "as_of_quarter": as_of_quarter,
+        "source_type": source_type,
+        "state": payload.get("state", {}),
+        "locked": bool(payload.get("locked", True)),
+        "rulebook_version": payload.get("rulebook_version", RULEBOOK_VERSION),
+        "created_at": payload.get("created_at") or (existing[0].get("created_at") if existing else now),
+        "updated_at": now,
+    }
+    result = _first(
+        _store().upsert(
+            "digital_twin_snapshots",
+            values,
+            "quarter,as_of_quarter,source_type",
+        )
+    )
+    audit("snapshot", "digital_twin_snapshots", quarter, {"as_of_quarter": values["as_of_quarter"], "locked": values["locked"]})
+    return result
+
+
+def list_digital_twin_snapshots(quarter: str | None = None) -> list[dict[str, Any]]:
+    return _store().select(
+        "digital_twin_snapshots",
+        {"quarter": quarter} if quarter else None,
+        order="updated_at",
+        descending=True,
+    )
+
+
+def add_digital_twin_run(payload: dict[str, Any]) -> dict[str, Any]:
+    quarter = str(payload.get("quarter") or "")
+    if quarter not in QUARTERS:
+        raise ValueError("Invalid quarter")
+    result = _store().insert(
+        "digital_twin_runs",
+        {
+            "quarter": quarter,
+            "scenario_name": payload.get("scenario_name", f"{quarter} scenario"),
+            "baseline_as_of": payload.get("baseline_as_of"),
+            "actions": payload.get("actions", []),
+            "assumptions": payload.get("assumptions", []),
+            "result": payload.get("result", {}),
+            "feasible": bool(payload.get("feasible", False)),
+            "rulebook_version": payload.get("rulebook_version", RULEBOOK_VERSION),
+            "created_at": utc_now(),
+        },
+    )
+    audit("simulate", "digital_twin_runs", str(result["id"]), {"quarter": quarter, "feasible": result["feasible"]})
+    return result
+
+
+def list_digital_twin_runs(quarter: str | None = None) -> list[dict[str, Any]]:
+    return _store().select(
+        "digital_twin_runs",
+        {"quarter": quarter} if quarter else None,
+        order="created_at",
+        descending=True,
+    )
+
+
+def add_market_intelligence_run(payload: dict[str, Any]) -> dict[str, Any]:
+    quarter = str(payload.get("quarter") or "")
+    if quarter not in QUARTERS:
+        raise ValueError("Invalid quarter")
+    result = _store().insert(
+        "market_intelligence_runs",
+        {
+            "quarter": quarter,
+            "result": payload.get("result", {}),
+            "input_fingerprint": payload.get("input_fingerprint", ""),
+            "created_at": utc_now(),
+        },
+    )
+    audit("analyze", "market_intelligence_runs", str(result["id"]), {"quarter": quarter})
+    return result
+
+
+def list_market_intelligence_runs(quarter: str | None = None) -> list[dict[str, Any]]:
+    return _store().select(
+        "market_intelligence_runs",
+        {"quarter": quarter} if quarter else None,
+        order="created_at",
+        descending=True,
     )
 
 

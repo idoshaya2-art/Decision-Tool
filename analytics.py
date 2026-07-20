@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from statistics import mean
 from typing import Any, Iterable
 
@@ -17,6 +17,7 @@ from intopia_rules import (
     compatible_x_units,
     decision_action,
 )
+from digital_twin import build_digital_twin_state, project_digital_twin
 from rulebook import (
     RULEBOOK_VERSION,
     evaluate_action as evaluate_rulebook_action,
@@ -2420,8 +2421,18 @@ def simulate_portfolio(
         )
 
     base_case = scenario(1.0)
+    validated_actions = [
+        {
+            **action,
+            "cost_sf": max(
+                num(action.get("cost_sf")),
+                impacts[index].cost_sf,
+            ),
+        }
+        for index, action in enumerate(actions)
+    ]
     rule_validation = evaluate_rulebook_portfolio(
-        actions,
+        validated_actions,
         quarter=quarter,
         operations=operations,
         available_budget_sf=effective_budget,
@@ -2429,6 +2440,125 @@ def simulate_portfolio(
         cash_buffer_sf=cash_buffer,
         strict=bool(payload.get("decision_pack", False)),
     )
+    area_aliases = {
+        "usa": "USA",
+        "united states": "USA",
+        "ארהב": "USA",
+        'ארה"ב': "USA",
+        "europe": "Europe",
+        "אירופה": "Europe",
+        "brazil": "Brazil",
+        "ברזיל": "Brazil",
+        "liechtenstein": "Liechtenstein",
+        "ליכטנשטיין": "Liechtenstein",
+        "home office": "Liechtenstein",
+        "מטה": "Liechtenstein",
+    }
+
+    def canonical_area(value: Any) -> str:
+        text = str(value or "").strip()
+        return area_aliases.get(text.lower(), text)
+
+    area_rows = {
+        canonical_area(row.get("area")): row
+        for row in financial.get("areas", [])
+        if row.get("area")
+    }
+    area_outflows: dict[str, float] = {}
+    for index, action in enumerate(actions):
+        area = canonical_area(action.get("area"))
+        if not area:
+            continue
+        catalog = decision_action(str(action.get("code") or ""))
+        action_type = str(action.get("type") or catalog.get("type") or "")
+        outflow = max(0.0, impacts[index].cost_sf)
+        if action_type == "money_transfer":
+            outflow += max(0.0, num(action.get("amount_sf")))
+        if outflow:
+            area_outflows[area] = area_outflows.get(area, 0.0) + outflow
+
+    area_checks: list[dict[str, Any]] = []
+    strict_pack = bool(payload.get("decision_pack", False))
+    for area, outflow in sorted(area_outflows.items()):
+        row = area_rows.get(area)
+        if row is None:
+            area_checks.append(
+                {
+                    "rule_id": "AREA-LIQUIDITY-SOURCE",
+                    "status": "fail" if strict_pack else "warn",
+                    "message": f"לא קיימת יתרת מזומן מאושרת עבור {area}; לא ניתן לאמת הוצאה של {outflow:,.0f} SF.",
+                    "blocking": strict_pack,
+                    "field": "area",
+                    "remediation": f"השלימו ואשרו מזומן והתחייבויות עבור {area} לפני אישור החבילה.",
+                }
+            )
+            continue
+        cash = num(row.get("ending_cash_sf"))
+        commitments = num(row.get("capex_commitments_sf"))
+        available = max(0.0, cash - commitments)
+        area_checks.append(
+            {
+                "rule_id": "AREA-LIQUIDITY-SOURCE",
+                "status": "fail" if outflow > available + 0.01 else "pass",
+                "message": (
+                    f"הוצאות מתוכננות ב-{area}: {outflow:,.0f} SF; "
+                    f"מזומן פנוי מקומי: {available:,.0f} SF."
+                ),
+                "blocking": outflow > available + 0.01,
+                "field": "amount_sf",
+                "remediation": (
+                    f"העבירו לפחות {outflow - available:,.0f} SF אל {area}, "
+                    "הקטינו את הפעולות או דחו אותן."
+                    if outflow > available + 0.01
+                    else ""
+                ),
+            }
+        )
+    if area_checks:
+        rule_validation["checks"].extend(area_checks)
+        area_blocking = [
+            row for row in area_checks
+            if row.get("blocking") and row.get("status") == "fail"
+        ]
+        area_warnings = [
+            row for row in area_checks
+            if not row.get("blocking") and row.get("status") != "pass"
+        ]
+        rule_validation["violations"].extend(area_blocking)
+        rule_validation["warnings"].extend(
+            row for row in area_checks if not row.get("blocking")
+        )
+        rule_validation["feasible"] = not rule_validation["violations"]
+        readiness = rule_validation.get("readiness", {})
+        readiness["blocking_count"] = len(rule_validation["violations"])
+        readiness["warning_count"] = len(
+            [
+                row for row in rule_validation["warnings"]
+                if row.get("status") != "pass"
+            ]
+        )
+        readiness["status"] = (
+            "blocked"
+            if readiness["blocking_count"]
+            else ("conditional" if readiness["warning_count"] else "ready")
+        )
+        readiness["label"] = {
+            "ready": "מוכן להגשה",
+            "conditional": "מוכן בכפוף לתיקונים",
+            "blocked": "חסום",
+        }[readiness["status"]]
+        readiness["required_fixes"] = list(
+            dict.fromkeys(
+                [
+                    *readiness.get("required_fixes", []),
+                    *[
+                        str(row.get("remediation") or row.get("message") or "")
+                        for row in area_blocking
+                    ],
+                ]
+            )
+        )
+        rule_validation["readiness"] = readiness
     violations = []
     if total_cost > effective_budget:
         violations.append("עלות הפעולות גבוהה מהתקציב הזמין.")
@@ -2440,6 +2570,19 @@ def simulate_portfolio(
         str(item.get("message") or item.get("rule_id") or "Rule violation")
         for item in rule_validation.get("violations", [])
     )
+    twin_baseline = build_digital_twin_state(quarter, financial, operations)
+    impact_payloads = [asdict(item) for item in impacts]
+    twin_scenarios = {
+        "low": project_digital_twin(
+            quarter, twin_baseline, actions, impact_payloads, multiplier=0.65
+        ),
+        "base": project_digital_twin(
+            quarter, twin_baseline, actions, impact_payloads, multiplier=1.0
+        ),
+        "high": project_digital_twin(
+            quarter, twin_baseline, actions, impact_payloads, multiplier=1.25
+        ),
+    }
     return {
         "quarter": quarter,
         "name": payload.get("name", "תרחיש חדש"),
@@ -2465,6 +2608,12 @@ def simulate_portfolio(
         "dependency_analysis": dependency_analysis,
         "catalog_coverage": {"available_actions": len(DECISION_ACTIONS), "selected_actions": len(actions)},
         "operating_effects": {"inventory_delta_units": round(sum(item.inventory_delta_units for item in impacts), 2), "capacity_delta_units": round(sum(item.capacity_delta_units for item in impacts), 2)},
+        "digital_twin": {
+            "baseline": twin_baseline,
+            "scenarios": twin_scenarios,
+            "base": twin_scenarios["base"],
+            "actuals_mutated": False,
+        },
         "warnings": [warning for item in impacts for warning in item.warnings],
         "confidence_change": round(sum(item.confidence_delta for item in impacts), 2),
         "assumptions": ["השפעות נמוך/בסיס/גבוה נגזרות מהנתונים שאושרו ומהנחות הפעולה, לא מהאלגוריתם הרשמי.", "הציון מפוצל תמיד ל-50% ביצועי עבר ו-50% פוטנציאל עתידי; משקלי המשנה הם מודל ניהולי פנימי.", "סימולציה אינה משנה נתוני אמת עד לאישור."],
