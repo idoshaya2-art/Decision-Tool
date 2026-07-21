@@ -2019,23 +2019,32 @@ async function loadHealth() {
 
 async function loadCurrentQuarter() {
   saveStatus("saving", "מעדכן…");
-  try {
-    $("#financeToSelect").value = state.quarter;
-    await Promise.all([
-      loadIntelligence(),
-      loadStrategyOptimization(),
-      loadUploads(),
-      loadReports(),
-      loadResearch(),
-      loadSavedScenarios(),
-      loadInsights(),
-      loadLearningLedger(),
-      loadDecisionLog(),
-      loadFinanceRange(),
-    ]);
+  $("#financeToSelect").value = state.quarter;
+  const modules = [
+    ["חדר החלטות", loadIntelligence],
+    ["אופטימיזציית אסטרטגיה", loadStrategyOptimization],
+    ["קבצים וקליטות", loadUploads],
+    ["דוחות", loadReports],
+    ["מחקרי שוק", loadResearch],
+    ["תרחישים שמורים", loadSavedScenarios],
+    ["תובנות", loadInsights],
+    ["יומן למידה", loadLearningLedger],
+    ["לוג החלטות ואישור קבוצתי", loadDecisionLog],
+    ["מצב פיננסי", loadFinanceRange],
+  ];
+  const results = await Promise.allSettled(modules.map(([, loader]) => loader()));
+  const failures = results
+    .map((result, index) => ({result, label: modules[index][0]}))
+    .filter(({result}) => result.status === "rejected");
+  if (!failures.length) {
     saveStatus("saved", "מחובר ונשמר בענן");
+    return;
   }
-  catch (error) { saveStatus("error", "טעינת הנתונים נכשלה"); toast(error.message, true); }
+  const failedLabels = failures.map(({label}) => label).join(", ");
+  const firstMessage = failures[0].result.reason?.message || "שגיאת שרת לא מזוהה";
+  saveStatus("error", `טעינה חלקית · ${failures.length} רכיבים נכשלו`);
+  console.error("Quarter modules failed", failures);
+  toast(`לא נטענו: ${failedLabels}. ${firstMessage}`, true);
 }
 
 async function initialize() {

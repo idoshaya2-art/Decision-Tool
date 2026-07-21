@@ -25,6 +25,10 @@ supabase/migration_v1.7_market_intelligence.sql
 supabase/migration_v1.9_group_governance.sql
 ```
 
+אם v1.7 ו־v1.9 כבר הורצו אך הממשק מציג "טעינה חלקית" או "טעינת הנתונים נכשלה",
+הריצו פעם אחת את `supabase/migration_v1.9_hotfix_missing_tables.sql`. הקובץ מאחד
+באופן idempotent את טבלאות v1.4–v1.6 החסרות ואינו מוחק נתונים קיימים.
+
 ### מערכת חדשה
 
 1. צרו פרויקט ב־Supabase ושמרו את סיסמת מסד הנתונים במקום בטוח.
