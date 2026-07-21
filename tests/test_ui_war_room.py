@@ -58,6 +58,12 @@ def test_dashboard_context_is_dynamic_and_has_no_fixed_q1_q3_copy():
 
 
 def test_optional_history_modules_do_not_hide_primary_data():
-    assert "Promise.allSettled" in APP
-    assert "if (researchResult.status === \"rejected\") throw researchResult.reason" in APP
+    assert "for (const [label, loader] of modules)" in APP
+    assert "Promise.allSettled(modules.map" not in APP
+    assert "state.currentReport" in APP
+    assert "data.market_intelligence" in APP
     assert "if (decisionsResult.status === \"rejected\") throw decisionsResult.reason" in APP
+
+
+def test_static_app_cache_key_is_advanced_for_controlled_loading_release():
+    assert '/static/app.js?v=1.9.1' in INDEX

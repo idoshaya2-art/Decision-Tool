@@ -5,6 +5,7 @@ const state = {
   strategyOptimization: null,
   insights: null,
   marketIntelligence: null,
+  currentReport: null,
   governanceSessions: [],
   learningLedger: null,
   financeRange: null,
@@ -1132,10 +1133,11 @@ function renderFinanceRangeExtras(selected) {
 
 async function loadFinanceRange() {
   const to = $("#financeToSelect").value || state.quarter;
-  const [report, intelligence] = await Promise.all([
-    api(`/api/reports/cumulative/${encodeURIComponent(to)}`),
-    api(`/api/intelligence/${encodeURIComponent(to)}`),
-  ]);
+  const cachedReport = state.currentReport?.endpoint === "cumulative" && state.currentReport?.quarter === to
+    ? state.currentReport.data
+    : null;
+  const report = cachedReport || await api(`/api/reports/cumulative/${encodeURIComponent(to)}`);
+  const intelligence = to === state.quarter && state.intelligence ? state.intelligence : report;
   state.financeRange = {report, intelligence};
   renderFinancePage();
 }
@@ -1194,6 +1196,7 @@ function renderAgentImportStatus(imports = []) {
 async function loadReports() {
   const endpoint = state.reportMode === "quarter" ? "quarter" : "cumulative";
   const data = await api(`/api/reports/${endpoint}/${state.quarter}`);
+  state.currentReport = {endpoint, quarter: state.quarter, data};
   const cumulativeThrough = data.data_as_of || state.quarter;
   const planningNote = data.planning_quarter ? ` · משמש לתכנון ${esc(data.planning_quarter)}` : "";
   $("#reportHeader").innerHTML = `<h2>${state.reportMode === "quarter" ? `דוח ${esc(state.quarter)}` : `דוח מצטבר Q1–${esc(cumulativeThrough)}`}</h2><p>${esc(data.scorecard?.label || "")}${planningNote}</p>`;
@@ -1299,13 +1302,8 @@ async function loadInsights() {
 
 async function loadResearch() {
   const domain = $("#researchDomainSelect").value || "";
-  const [researchResult, intelligenceResult] = await Promise.allSettled([
-    api(`/api/research/relevant/${state.quarter}?domain=${encodeURIComponent(domain)}`),
-    api(`/api/market-intelligence/${state.quarter}`),
-  ]);
-  if (researchResult.status === "rejected") throw researchResult.reason;
-  const data = researchResult.value;
-  const intelligence = intelligenceResult.status === "fulfilled" ? intelligenceResult.value : {
+  const data = await api(`/api/research/relevant/${state.quarter}?domain=${encodeURIComponent(domain)}`);
+  const intelligence = data.market_intelligence || {
     recommended_research: [], calibration_signals: [], cannot_conclude: ["היסטוריית ניתוחי השוק אינה זמינה כרגע; תוצאות המחקר המאושרות עדיין מוצגות."], mapping_coverage: {},
   };
   state.marketIntelligence = intelligence;
@@ -2077,22 +2075,30 @@ async function loadHealth() {
 async function loadCurrentQuarter() {
   saveStatus("saving", "מעדכן…");
   $("#financeToSelect").value = state.quarter;
+  state.currentReport = null;
   const modules = [
-    ["חדר החלטות", loadIntelligence],
-    ["אופטימיזציית אסטרטגיה", loadStrategyOptimization],
     ["קבצים וקליטות", loadUploads],
+    ["חדר החלטות", loadIntelligence],
     ["דוחות", loadReports],
+    ["מצב פיננסי", loadFinanceRange],
+    ["אופטימיזציית אסטרטגיה", loadStrategyOptimization],
     ["מחקרי שוק", loadResearch],
-    ["תרחישים שמורים", loadSavedScenarios],
     ["תובנות", loadInsights],
+    ["תרחישים שמורים", loadSavedScenarios],
     ["יומן למידה", loadLearningLedger],
     ["לוג החלטות ואישור קבוצתי", loadDecisionLog],
-    ["מצב פיננסי", loadFinanceRange],
   ];
-  const results = await Promise.allSettled(modules.map(([, loader]) => loader()));
-  const failures = results
-    .map((result, index) => ({result, label: modules[index][0]}))
-    .filter(({result}) => result.status === "rejected");
+  const failures = [];
+  // Render's free worker is intentionally loaded in sequence. Several of these
+  // endpoints build the same decision-intelligence bundle; firing all of them
+  // concurrently can exhaust the worker and surface intermittent 500 errors.
+  for (const [label, loader] of modules) {
+    try {
+      await loader();
+    } catch (reason) {
+      failures.push({label, result: {status: "rejected", reason}});
+    }
+  }
   if (!failures.length) {
     saveStatus("saved", "מחובר ונשמר בענן");
     return;

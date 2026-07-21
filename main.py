@@ -1346,7 +1346,21 @@ def relevant_research(quarter: str, domain: str = ""):
         ).lower()
         relevant = not needle or needle in haystack or any(token in haystack for token in decisions.split() if len(token) > 3)
         results.append({**row, "relevant": relevant})
-    return {"quarter": quarter, "domain": domain, "results": sorted(results, key=lambda row: (not row["relevant"], str(row.get("title", "")))), "catalog": db.get_market_research_catalog()}
+    catalog = db.get_market_research_catalog()
+    market_intelligence = build_market_intelligence(
+        quarter,
+        catalog,
+        db.list_research_results(),
+        db.list_operations(),
+        bundle.get("recommendations", []),
+    )
+    return {
+        "quarter": quarter,
+        "domain": domain,
+        "results": sorted(results, key=lambda row: (not row["relevant"], str(row.get("title", "")))),
+        "catalog": catalog,
+        "market_intelligence": market_intelligence,
+    }
 
 
 @app.get("/api/market-intelligence/{quarter}")
