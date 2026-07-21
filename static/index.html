@@ -6,14 +6,14 @@
   <meta name="color-scheme" content="light">
   <title>EMBA TAU Simulation</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=1.5.0">
+  <link rel="stylesheet" href="/static/styles.css?v=1.6.0">
 </head>
 <body>
   <header class="topbar">
     <div class="brand-row">
       <button id="menuButton" class="icon-button" type="button" aria-label="פתיחת תפריט" aria-expanded="false">☰</button>
       <div class="brand-mark">EM</div>
-      <div class="brand-copy"><strong>EMBA TAU Simulation</strong><small>Decision Intelligence Platform</small></div>
+      <div class="brand-copy"><strong>EMBA TAU Simulation</strong><small>Group 8 · Decision OS</small></div>
     </div>
     <div class="top-actions">
       <label class="quarter-picker">תצוגה <select id="quarterSelect" aria-label="בחירת תצוגה ורבעון"></select></label>
@@ -25,22 +25,26 @@
   <div id="menuOverlay" class="menu-overlay" hidden></div>
   <div id="appShell" class="app-shell">
     <aside id="sideNav" class="side-nav" aria-label="ניווט ראשי" aria-hidden="true">
-      <div class="nav-heading">ניווט</div>
+      <div class="nav-heading">מסלול העבודה</div>
       <button class="nav-item active" data-section="dashboard">חדר החלטות</button>
-      <button class="nav-item" data-section="strategyopt">אופטימיזציית אסטרטגיה</button>
       <button class="nav-item" data-section="agent">צ׳אט AI והעלאת קבצים</button>
       <button class="nav-item" data-section="finance">מצב פיננסי</button>
       <button class="nav-item" data-section="reports">תובנות ומגמות</button>
       <button class="nav-item" data-section="decisionlog">לוג החלטות</button>
-      <button class="nav-item" data-section="settings">הגדרות</button>
-      <div class="nav-heading nav-secondary-heading">כלי אנליסט</div>
-      <button class="nav-item secondary-nav" data-section="simulation">מעבדת תרחישים</button>
-      <button class="nav-item secondary-nav" data-section="economics">תמחור וכלכלת יחידה</button>
-      <button class="nav-item secondary-nav" data-section="files">מרכז קבצים וקליטה</button>
-      <button class="nav-item secondary-nav" data-section="rules">מרכז החוקים</button>
-      <button class="nav-item secondary-nav" data-section="guide">מדריך שימוש</button>
-      <button class="nav-item secondary-nav" data-section="backup">גיבוי ושחזור</button>
-      <div class="nav-foot">AI Decision OS v1.5<br><span>Supabase · Rulebook · Evidence Gate · OpenAI</span></div>
+      <details id="moreToolsNav" class="nav-more">
+        <summary>כלים נוספים</summary>
+        <div class="nav-more-body">
+          <button class="nav-item secondary-nav" data-section="strategyopt">אופטימיזציית אסטרטגיה</button>
+          <button class="nav-item secondary-nav" data-section="simulation">מעבדת תרחישים</button>
+          <button class="nav-item secondary-nav" data-section="economics">תמחור וכלכלת יחידה</button>
+          <button class="nav-item secondary-nav" data-section="files">מרכז קבצים וקליטה</button>
+          <button class="nav-item secondary-nav" data-section="rules">מרכז החוקים</button>
+          <button class="nav-item secondary-nav" data-section="guide">מדריך שימוש</button>
+          <button class="nav-item secondary-nav" data-section="backup">גיבוי ושחזור</button>
+        </div>
+      </details>
+      <button class="nav-item nav-settings" data-section="settings">הגדרות</button>
+      <div class="nav-foot">AI Decision OS v1.6<br><span>Supabase · Rulebook · Evidence Gate · OpenAI</span></div>
     </aside>
 
     <main>
@@ -49,19 +53,26 @@
           <div><p id="dashboardQuarterEyebrow" class="eyebrow">חדר החלטות</p><h1>חדר החלטות</h1><p id="dashboardContextText">טוען את תמונת המצב המאושרת ואת ההשפעה עד Q9…</p></div>
           <button id="refreshButton" class="button secondary" type="button">רענון נתונים</button>
         </div>
+        <nav class="decision-flow" aria-label="תהליך קבלת החלטה">
+          <button class="flow-step active" type="button" data-scroll-target="decisionSnapshot"><b>1</b><span><strong>תמונת מצב</strong><small>מה קורה עכשיו?</small></span></button>
+          <button class="flow-step" type="button" data-scroll-target="decisionPriority"><b>2</b><span><strong>החלטות קריטיות</strong><small>מה חייבים להחליט?</small></span></button>
+          <button class="flow-step" type="button" data-scroll-target="decisionImpact"><b>3</b><span><strong>בדיקת השפעה</strong><small>מה יקרה אם נפעל?</small></span></button>
+          <button class="flow-step" type="button" data-scroll-target="decisionApproval"><b>4</b><span><strong>אישור ותיעוד</strong><small>מי אחראי ומה הוחלט?</small></span></button>
+        </nav>
         <div id="setupNotice" class="notice hidden"><strong>כדי להפעיל המלצות:</strong> <span id="setupNoticeText">העלו ואשרו דוח רבעוני ואסטרטגיה.</span></div>
-        <div class="q9-strip">
-          <div><span>תחזית Q9</span><strong id="q9Score">—</strong><small id="q9Confidence">ממתין לנתונים</small></div>
-          <div><span>50% ביצועי עבר</span><strong id="pastScore">—</strong><small id="pastCoverage">כיסוי נתונים —</small></div>
-          <div><span>50% פוטנציאל עתידי</span><strong id="futureScore">—</strong><small id="futureCoverage">כיסוי נתונים —</small></div>
+        <div id="decisionSnapshot" class="q9-strip focus-summary">
+          <div class="score-card"><span>אומדן ציון Q9</span><strong id="q9Score">—</strong><small id="q9Confidence">ממתין לנתונים</small></div>
+          <div class="score-breakdown"><span>פירוט 50% / 50%</span><div><p><b id="pastScore">—</b> ביצועי עבר</p><p><b id="futureScore">—</b> פוטנציאל עתידי</p></div><small><span id="pastCoverage">כיסוי נתונים —</span><span id="futureCoverage">כיסוי נתונים —</span></small></div>
           <div><span>נזילות לסוף התקופה</span><strong id="liquidityPosition">—</strong><small id="liquidityNote">ממתין לנתונים</small></div>
           <div><span>חסמים לפני החלטה</span><strong id="decisionBlockers">—</strong><small id="decisionBlockersNote">בדיקת חוקים ומידע חסר</small></div>
         </div>
-        <div id="decisionGateBanner" class="decision-gate unknown" role="status" aria-live="polite"></div>
-        <div id="evidenceGateSummary" class="evidence-gate-summary unknown" role="status" aria-live="polite"></div>
+        <div class="readiness-stack">
+          <div id="decisionGateBanner" class="decision-gate unknown" role="status" aria-live="polite"></div>
+          <div id="evidenceGateSummary" class="evidence-gate-summary unknown" role="status" aria-live="polite"></div>
+        </div>
         <div class="dashboard-grid">
-          <article class="panel decision-panel">
-            <div class="panel-head"><div><span class="panel-kicker">CATEGORY RECOMMENDATIONS</span><h2>המלצות שעברו את הבדיקה — לפי תחום</h2></div><span class="soft-pill">עד 5 קריטיות</span></div>
+          <article id="decisionPriority" class="panel decision-panel">
+            <div class="panel-head"><div><span class="panel-kicker">NEXT BEST ACTIONS</span><h2>שלוש ההחלטות החשובות עכשיו</h2><p>מדורגות לפי השפעה על הציון, דחיפות ותלויות.</p></div><span class="soft-pill">ממוקד</span></div>
             <div id="decisionDependencySummary" class="dependency-summary"></div>
             <div id="recommendationsList" class="recommendation-groups"></div>
           </article>
@@ -71,6 +82,10 @@
             <div id="dashboardFinance" class="metric-list"></div>
             <button class="text-link rtl-next-link" type="button" data-go="finance">לפירוט הכספי המלא</button>
           </article>
+        </div>
+        <div id="decisionImpact" class="decision-workflow-grid">
+          <article class="panel decision-tools"><div class="panel-head"><div><span class="panel-kicker">IMPACT CHECK</span><h2>בדקו את ההשפעה לפני החלטה</h2></div></div><p>השוו חלופות, בדקו מחיר ושאלו את ה־AI. הסימולציה אינה משנה את נתוני האמת.</p><div class="action-row"><button class="button primary" type="button" data-go="simulation">השוואת חלופות</button><button class="button secondary" type="button" data-go="economics">בדיקת מחיר</button><button class="button ghost" type="button" data-go="agent">שאלו את ה־AI</button></div></article>
+          <article id="decisionApproval" class="panel approval-panel"><div class="panel-head"><div><span class="panel-kicker">APPROVE & RECORD</span><h2>סוגרים החלטה עם אחריות</h2></div></div><p>אחרי שבדקתם את ההשפעה, תעדו את הבחירה, בעל התפקיד והנימוק.</p><div class="action-row"><button class="button primary" type="button" data-go="decisionlog">מעבר לאישור ותיעוד</button></div></article>
         </div>
         <details class="analyst-disclosure">
           <summary>
@@ -120,14 +135,16 @@
             </article>
           </div>
         </details>
-        <div class="dashboard-grid lower-grid">
-          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">TRAJECTORY</span><h2>מסלול ל־Q9</h2></div></div><div id="forecastSummary" class="forecast-grid"></div></article>
-          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">EVIDENCE</span><h2>מחקרים רלוונטיים</h2></div><button class="text-link" type="button" data-go="reports">לתובנות ולתוצאות המחקר</button></div><div id="dashboardResearch" class="compact-list"></div></article>
-        </div>
-        <div class="dashboard-grid lower-grid">
-          <article class="panel"><div class="panel-head"><div><span class="panel-kicker">WHAT CHANGED</span><h2>מה השתנה מאז הרבעון הקודם?</h2></div><button class="text-link" type="button" data-go="reports">לכל המגמות</button></div><div id="dashboardChanges" class="compact-list"></div></article>
-          <article class="panel decision-tools"><div class="panel-head"><div><span class="panel-kicker">DECISION TOOLS</span><h2>בדקו לפני שמאשרים</h2></div></div><p>הסימולציה אינה משנה את נתוני האמת. אפשר להשוות חלופות או לבדוק מחיר לפני תיעוד החלטה.</p><div class="action-row"><button class="button secondary" type="button" data-go="simulation">השוואת חלופות</button><button class="button secondary" type="button" data-go="economics">בדיקת מחיר</button><button class="button ghost" type="button" data-go="agent">שאלו את ה-AI</button></div></article>
-        </div>
+        <details class="supporting-insights">
+          <summary><div><strong>תובנות תומכות</strong><small>מסלול Q9, מחקרי שוק ומה השתנה מהרבעון הקודם</small></div><span>פתיחה לפי צורך</span></summary>
+          <div class="supporting-insights-body">
+            <div class="dashboard-grid lower-grid">
+              <article class="panel"><div class="panel-head"><div><span class="panel-kicker">TRAJECTORY</span><h2>מסלול ל־Q9</h2></div></div><div id="forecastSummary" class="forecast-grid"></div></article>
+              <article class="panel"><div class="panel-head"><div><span class="panel-kicker">EVIDENCE</span><h2>מחקרים רלוונטיים</h2></div><button class="text-link" type="button" data-go="reports">לתוצאות המחקר</button></div><div id="dashboardResearch" class="compact-list"></div></article>
+            </div>
+            <article class="panel changes-panel"><div class="panel-head"><div><span class="panel-kicker">WHAT CHANGED</span><h2>מה השתנה מאז הרבעון הקודם?</h2></div><button class="text-link" type="button" data-go="reports">לכל המגמות</button></div><div id="dashboardChanges" class="compact-list"></div></article>
+          </div>
+        </details>
       </section>
 
       <section id="section-strategyopt" class="page">
@@ -457,6 +474,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js?v=1.9.1" defer></script>
+  <script src="/static/app.js?v=2.0.0" defer></script>
 </body>
 </html>

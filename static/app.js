@@ -448,6 +448,9 @@ function showSection(name) {
   $$(".page").forEach(page => page.classList.toggle("active", page.id === `section-${name}`));
   $$(".nav-item").forEach(button => button.classList.toggle("active", button.dataset.section === name));
   $$(".primary-tab").forEach(button => button.classList.toggle("active", button.dataset.section === name));
+  const selectedNavItem = $(`.nav-item[data-section="${name}"]`);
+  const moreTools = selectedNavItem?.closest(".nav-more");
+  if (moreTools) moreTools.open = true;
   closeMenu();
   window.scrollTo({top: 0, behavior: "smooth"});
 }
@@ -804,13 +807,26 @@ function renderRecommendations() {
     const matches = indexedRows.filter(item => recommendationCategory(item.row) === category.key);
     return {...category, matches, firstPriority: matches[0]?.index ?? Number.MAX_SAFE_INTEGER};
   }).filter(category => category.matches.length).sort((a, b) => a.firstPriority - b.firstPriority);
-  $("#recommendationsList").innerHTML = rows.length ? rankedCategories.map(category => {
+  const categoryMarkup = categories => categories.map(category => {
     const matches = category.matches;
     return `<section class="recommendation-category-group category-${category.key}">
       <header><div><span>${esc(category.labelEn)}</span><h3>${esc(category.label)}</h3></div><b>${fmt(matches.length)}</b></header>
       <div class="recommendation-list">${matches.map(item => recommendationCard(item.row, item.index)).join("")}</div>
     </section>`;
-  }).join("") : '<div class="empty-copy">אין עדיין מספיק נתונים ליצירת המלצות.</div>';
+  }).join("");
+  const primaryIndexes = new Set(indexedRows.slice(0, 3).map(item => item.index));
+  const primaryCategories = rankedCategories.map(category => ({
+    ...category,
+    matches: category.matches.filter(item => primaryIndexes.has(item.index)),
+  })).filter(category => category.matches.length);
+  const secondaryCategories = rankedCategories.map(category => ({
+    ...category,
+    matches: category.matches.filter(item => !primaryIndexes.has(item.index)),
+  })).filter(category => category.matches.length);
+  $("#recommendationsList").innerHTML = rows.length ? `
+    ${categoryMarkup(primaryCategories)}
+    ${secondaryCategories.length ? `<details class="more-recommendations"><summary><span>המלצות נוספות</span><small>${fmt(rows.length - primaryIndexes.size)} החלטות למעקב</small></summary><div>${categoryMarkup(secondaryCategories)}</div></details>` : ""}
+  ` : '<div class="empty-copy">אין עדיין מספיק נתונים ליצירת המלצות.</div>';
 }
 
 function areaOptions() {
@@ -1627,6 +1643,12 @@ function bindNavigation() {
   });
   $$(".nav-item").forEach(button => button.addEventListener("click", () => showSection(button.dataset.section)));
   $$('[data-go]').forEach(button => button.addEventListener("click", () => showSection(button.dataset.go)));
+  $$("[data-scroll-target]").forEach(button => button.addEventListener("click", () => {
+    const target = document.getElementById(button.dataset.scrollTarget);
+    if (!target) return;
+    $$(".flow-step").forEach(step => step.classList.toggle("active", step === button));
+    target.scrollIntoView({behavior: "smooth", block: "start"});
+  }));
 }
 
 function bindStrategyOptimization() {

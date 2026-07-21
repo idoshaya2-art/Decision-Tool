@@ -11,6 +11,22 @@ def test_war_room_uses_single_hamburger_navigation_and_progressive_disclosure():
     assert 'id="sideNav"' in INDEX
     assert '<nav class="primary-tabs"' not in INDEX
     assert 'class="analyst-disclosure"' in INDEX
+    assert 'id="moreToolsNav"' in INDEX
+    assert 'class="supporting-insights"' in INDEX
+
+
+def test_dashboard_has_a_clear_four_step_decision_flow():
+    assert 'class="decision-flow"' in INDEX
+    for target in ("decisionSnapshot", "decisionPriority", "decisionImpact", "decisionApproval"):
+        assert f'data-scroll-target="{target}"' in INDEX
+        assert f'id="{target}"' in INDEX
+    assert '$$("[data-scroll-target]")' in APP
+
+
+def test_dashboard_prioritizes_three_recommendations_and_preserves_the_rest():
+    assert "indexedRows.slice(0, 3)" in APP
+    assert 'class="more-recommendations"' in APP
+    assert "המלצות נוספות" in APP
 
 
 def test_q9_strip_exposes_score_liquidity_and_blocking_signals():
@@ -66,4 +82,5 @@ def test_optional_history_modules_do_not_hide_primary_data():
 
 
 def test_static_app_cache_key_is_advanced_for_controlled_loading_release():
-    assert '/static/app.js?v=1.9.1' in INDEX
+    assert '/static/app.js?v=2.0.0' in INDEX
+    assert '/static/styles.css?v=1.6.0' in INDEX
