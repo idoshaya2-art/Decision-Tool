@@ -192,6 +192,45 @@ def _store() -> CloudStore:
     return get_store()
 
 
+def _is_missing_optional_table(exc: Exception) -> bool:
+    """Return True only for PostgREST's missing-table/schema-cache error."""
+    code = getattr(exc, "code", None)
+    if code == "PGRST205":
+        return True
+    for arg in getattr(exc, "args", ()):
+        if isinstance(arg, dict) and arg.get("code") == "PGRST205":
+            return True
+    message = str(exc)
+    return "PGRST205" in message or "Could not find the table" in message
+
+
+def _optional_select(
+    table: str,
+    filters: dict[str, Any] | None = None,
+    *,
+    order: str | None = None,
+    descending: bool = False,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Read optional history data without taking down the operational UI.
+
+    A missing migration is surfaced by the health/readiness tooling, while core
+    data and recommendations remain available. All non-schema errors still fail.
+    """
+    try:
+        return _store().select(
+            table,
+            filters,
+            order=order,
+            descending=descending,
+            limit=limit,
+        )
+    except Exception as exc:
+        if _is_missing_optional_table(exc):
+            return []
+        raise
+
+
 def _first(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return dict(rows[0]) if rows else {}
 
@@ -854,7 +893,7 @@ def add_forecast_evaluation(payload: dict[str, Any]) -> dict[str, Any]:
 
 def list_forecast_evaluations(quarter: str | None = None) -> list[dict[str, Any]]:
     filters = {"target_quarter": quarter} if quarter else None
-    return _store().select("forecast_evaluations", filters, order="evaluated_at", descending=True)
+    return _optional_select("forecast_evaluations", filters, order="evaluated_at", descending=True)
 
 
 def add_calibration_proposal(payload: dict[str, Any]) -> dict[str, Any]:
@@ -881,7 +920,7 @@ def add_calibration_proposal(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_calibration_proposals(status: str | None = None) -> list[dict[str, Any]]:
-    return _store().select(
+    return _optional_select(
         "calibration_proposals",
         {"status": status} if status else None,
         order="created_at",
@@ -1062,7 +1101,7 @@ def add_decision_session(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_decision_sessions(quarter: str | None = None) -> list[dict[str, Any]]:
-    return _store().select(
+    return _optional_select(
         "decision_sessions",
         {"quarter": quarter} if quarter else None,
         order="created_at",
@@ -1071,7 +1110,7 @@ def list_decision_sessions(quarter: str | None = None) -> list[dict[str, Any]]:
 
 
 def get_decision_session(session_id: str) -> dict[str, Any]:
-    return _first(_store().select("decision_sessions", {"id": session_id}, limit=1))
+    return _first(_optional_select("decision_sessions", {"id": session_id}, limit=1))
 
 
 def update_decision_session(session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1106,7 +1145,7 @@ def upsert_decision_vote(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_decision_votes(session_id: str) -> list[dict[str, Any]]:
-    return _store().select("decision_votes", {"session_id": session_id}, order="updated_at")
+    return _optional_select("decision_votes", {"session_id": session_id}, order="updated_at")
 
 
 def upsert_digital_twin_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1200,7 +1239,7 @@ def add_market_intelligence_run(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_market_intelligence_runs(quarter: str | None = None) -> list[dict[str, Any]]:
-    return _store().select(
+    return _optional_select(
         "market_intelligence_runs",
         {"quarter": quarter} if quarter else None,
         order="created_at",

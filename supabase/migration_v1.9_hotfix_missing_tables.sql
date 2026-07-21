@@ -84,28 +84,81 @@ create table if not exists public.digital_twin_runs (
     created_at timestamptz not null default now()
 );
 
+create table if not exists public.market_intelligence_runs (
+    id uuid primary key default gen_random_uuid(),
+    quarter text not null,
+    result jsonb not null default '{}'::jsonb,
+    input_fingerprint text not null default '',
+    created_at timestamptz not null default now()
+);
+
+create table if not exists public.decision_sessions (
+    id uuid primary key default gen_random_uuid(),
+    quarter text not null,
+    name text not null,
+    status text not null default 'draft',
+    decision_pack_id uuid references public.decision_packs(id) on delete set null,
+    optimization_run_id uuid references public.optimization_runs(id) on delete set null,
+    rulebook_version text not null references public.rulebook_versions(version),
+    snapshot jsonb not null default '{}'::jsonb,
+    validation jsonb not null default '{}'::jsonb,
+    facilitator text not null default '',
+    approved_by jsonb not null default '[]'::jsonb,
+    approved_at timestamptz,
+    locked boolean not null default false,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+create table if not exists public.decision_votes (
+    id uuid primary key default gen_random_uuid(),
+    session_id uuid not null references public.decision_sessions(id) on delete cascade,
+    role text not null,
+    voter_name text not null,
+    vote text not null,
+    rationale text not null default '',
+    concerns jsonb not null default '[]'::jsonb,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (session_id, role)
+);
+
 create index if not exists forecasts_target_idx on public.forecasts (target_quarter, status, created_at desc);
 create index if not exists forecast_evaluations_target_idx on public.forecast_evaluations (target_quarter, evaluated_at desc);
 create index if not exists calibration_proposals_status_idx on public.calibration_proposals (status, created_at desc);
 create index if not exists evidence_gate_runs_quarter_idx on public.evidence_gate_runs (quarter, created_at desc);
 create index if not exists digital_twin_runs_quarter_idx on public.digital_twin_runs (quarter, created_at desc);
+create index if not exists market_intelligence_runs_quarter_idx on public.market_intelligence_runs (quarter, created_at desc);
+create index if not exists decision_sessions_quarter_idx on public.decision_sessions (quarter, created_at desc);
+create index if not exists decision_votes_session_idx on public.decision_votes (session_id, updated_at);
 
 alter table public.forecast_evaluations enable row level security;
 alter table public.calibration_proposals enable row level security;
 alter table public.evidence_gate_runs enable row level security;
 alter table public.digital_twin_snapshots enable row level security;
 alter table public.digital_twin_runs enable row level security;
+alter table public.market_intelligence_runs enable row level security;
+alter table public.decision_sessions enable row level security;
+alter table public.decision_votes enable row level security;
 
 revoke all on table public.forecast_evaluations from anon, authenticated;
 revoke all on table public.calibration_proposals from anon, authenticated;
 revoke all on table public.evidence_gate_runs from anon, authenticated;
 revoke all on table public.digital_twin_snapshots from anon, authenticated;
 revoke all on table public.digital_twin_runs from anon, authenticated;
+revoke all on table public.market_intelligence_runs from anon, authenticated;
+revoke all on table public.decision_sessions from anon, authenticated;
+revoke all on table public.decision_votes from anon, authenticated;
 
 grant all on table public.forecast_evaluations to service_role;
 grant all on table public.calibration_proposals to service_role;
 grant all on table public.evidence_gate_runs to service_role;
 grant all on table public.digital_twin_snapshots to service_role;
 grant all on table public.digital_twin_runs to service_role;
+grant all on table public.market_intelligence_runs to service_role;
+grant all on table public.decision_sessions to service_role;
+grant all on table public.decision_votes to service_role;
 
 commit;
+
+notify pgrst, 'reload schema';

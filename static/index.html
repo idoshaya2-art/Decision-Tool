@@ -46,10 +46,10 @@
     <main>
       <section id="section-dashboard" class="page active">
         <div class="page-head">
-          <div><p class="eyebrow">Q4 PLANNING ROOM</p><h1>חדר החלטות</h1><p>תמונת פתיחה המבוססת על Q1–Q3 ומסתכלת תמיד עד Q9.</p></div>
+          <div><p id="dashboardQuarterEyebrow" class="eyebrow">חדר החלטות</p><h1>חדר החלטות</h1><p id="dashboardContextText">טוען את תמונת המצב המאושרת ואת ההשפעה עד Q9…</p></div>
           <button id="refreshButton" class="button secondary" type="button">רענון נתונים</button>
         </div>
-        <div id="setupNotice" class="notice hidden"><strong>כדי להתחיל:</strong> העלו ואשרו בנפרד את דוחות Q1, Q2 ו־Q3.</div>
+        <div id="setupNotice" class="notice hidden"><strong>כדי להפעיל המלצות:</strong> <span id="setupNoticeText">העלו ואשרו דוח רבעוני ואסטרטגיה.</span></div>
         <div class="q9-strip">
           <div><span>תחזית Q9</span><strong id="q9Score">—</strong><small id="q9Confidence">ממתין לנתונים</small></div>
           <div><span>50% ביצועי עבר</span><strong id="pastScore">—</strong><small id="pastCoverage">כיסוי נתונים —</small></div>
@@ -116,7 +116,7 @@
                   <tbody id="executionBlueprintRows"></tbody>
                 </table>
               </div>
-              <div id="executionBlueprintEmpty" class="empty-copy hidden">אין עדיין תכנית מספרית. אשרו את Q1–Q3 ואת האסטרטגיה כדי לייצר אותה.</div>
+              <div id="executionBlueprintEmpty" class="empty-copy hidden">אין עדיין תכנית מספרית לרבעון הנבחר. אשרו לפחות דוח רבעוני אחד ואת האסטרטגיה כדי לייצר אותה.</div>
             </article>
           </div>
         </details>
@@ -438,10 +438,10 @@
       </section>
 
       <section id="section-guide" class="page">
-        <div class="page-head"><div><p class="eyebrow">HOW TO USE</p><h1>מדריך שימוש</h1><p>מסלול העבודה הקבוע מסיום Q3 ועד Q9.</p></div></div>
+        <div class="page-head"><div><p class="eyebrow">HOW TO USE</p><h1>מדריך שימוש</h1><p>מחזור עבודה דינמי: קליטת תוצאות, למידה, החלטה ותחזית עד Q9.</p></div></div>
         <div class="guide-steps">
           <article class="guide-step"><span>1</span><div><h2>הקמה</h2><p>הגדירו חברה, רצפת מזומן ויעדי Q9; העלו אסטרטגיה וכללי משחק.</p></div></article>
-          <article class="guide-step"><span>2</span><div><h2>קליטת Q1–Q3</h2><p>העלו כל רבעון בנפרד, בדקו חריגים ואשרו את הנתונים שחולצו.</p></div></article>
+          <article class="guide-step"><span>2</span><div><h2>קליטת תוצאות</h2><p>העלו כל דוח רבעוני בנפרד, בדקו חריגים ואשרו את הנתונים שחולצו.</p></div></article>
           <article class="guide-step"><span>3</span><div><h2>חדר החלטות</h2><p>עברו על כספים, תחזית Q9 ושלוש עד חמש ההחלטות הדחופות.</p></div></article>
           <article class="guide-step"><span>4</span><div><h2>מחקר וסימולציה</h2><p>בדקו רק מחקרים רלוונטיים וסמלצו חלופות במסגרת התקציב.</p></div></article>
           <article class="guide-step"><span>5</span><div><h2>אישור וגיבוי</h2><p>שמרו תרחיש, תעדו החלטה, צרו Snapshot והורידו גיבוי.</p></div></article>
@@ -451,7 +451,7 @@
 
       <section id="section-backup" class="page">
         <div class="page-head"><div><p class="eyebrow">CONTINUITY</p><h1>גיבוי ושחזור</h1><p>כל הרשומות, מחקרי השוק, התרחישים, שיחות ה-Agent והקבצים.</p></div></div>
-        <div class="two-columns"><article class="panel"><h2>הורדת גיבוי מלא</h2><p>מומלץ לאחר קליטת Q1–Q3 ולפני סגירת כל רבעון.</p><a class="button" href="/api/backup">הורדת ZIP</a></article><article class="panel"><h2>שחזור מגיבוי</h2><form id="restoreForm" class="restore-form"><input name="file" type="file" accept=".zip" required><select name="mode"><option value="replace">החלפה מלאה</option><option value="merge">מיזוג</option></select><button class="button danger" type="submit">שחזור</button></form></article></div>
+        <div class="two-columns"><article class="panel"><h2>הורדת גיבוי מלא</h2><p>מומלץ לאחר אישור כל דוח ולפני סגירת כל רבעון.</p><a class="button" href="/api/backup">הורדת ZIP</a></article><article class="panel"><h2>שחזור מגיבוי</h2><form id="restoreForm" class="restore-form"><input name="file" type="file" accept=".zip" required><select name="mode"><option value="replace">החלפה מלאה</option><option value="merge">מיזוג</option></select><button class="button danger" type="submit">שחזור</button></form></article></div>
         <article class="panel danger-zone"><div><h2>איפוס נתוני חברה</h2><p>מוחק רשומות וקבצים אך משאיר קטלוגי מבנה.</p></div><button id="resetButton" class="button danger secondary" type="button">איפוס</button></article>
       </section>
     </main>

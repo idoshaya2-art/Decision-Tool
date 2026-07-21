@@ -46,3 +46,18 @@ def test_navigation_manages_focus_when_the_hamburger_is_closed():
     assert "sideNav.inert = true" in APP
     assert "sideNav.inert = false" in APP
     assert "menuReturnFocus" in APP
+
+
+def test_dashboard_context_is_dynamic_and_has_no_fixed_q1_q3_copy():
+    assert 'id="dashboardQuarterEyebrow"' in INDEX
+    assert 'id="dashboardContextText"' in INDEX
+    assert "renderDynamicQuarterContext" in APP
+    assert "actualDataQuarter" in APP
+    assert "Q4 PLANNING ROOM" not in INDEX
+    assert "תמונת פתיחה המבוססת על Q1–Q3" not in INDEX
+
+
+def test_optional_history_modules_do_not_hide_primary_data():
+    assert "Promise.allSettled" in APP
+    assert "if (researchResult.status === \"rejected\") throw researchResult.reason" in APP
+    assert "if (decisionsResult.status === \"rejected\") throw decisionsResult.reason" in APP

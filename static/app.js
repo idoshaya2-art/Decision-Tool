@@ -96,6 +96,49 @@ function nextPlanningQuarter(actualQuarter) {
   return `Q${Math.min(9, quarterNumber(actualQuarter) + 1)}`;
 }
 
+function actualDataQuarter() {
+  return state.intelligence?.financial?.actual_coverage?.data_as_of
+    || state.intelligence?.action_review?.actual_as_of
+    || latestApprovedQuarter()
+    || null;
+}
+
+function renderDynamicQuarterContext(readiness = null) {
+  const eyebrow = $("#dashboardQuarterEyebrow");
+  const context = $("#dashboardContextText");
+  const notice = $("#setupNotice");
+  const noticeText = $("#setupNoticeText");
+  if (!eyebrow || !context || !notice || !noticeText) return;
+
+  const actual = actualDataQuarter();
+  const selected = state.quarter;
+  if (state.viewMode === "cumulative") {
+    eyebrow.textContent = actual ? `מצב מצטבר עד ${actual}` : "מצב מצטבר";
+    context.textContent = actual
+      ? `Actuals מאושרים עד ${actual}; מגמות, החלטות ותחזית מצטברת עד Q9.`
+      : "טרם אושר דוח רבעוני. לאחר האישור יוצגו מגמות ותחזית מצטברת עד Q9.";
+  } else {
+    eyebrow.textContent = `${selected} · חדר החלטות`;
+    context.textContent = actual
+      ? `המצב מבוסס על Actuals מאושרים עד ${actual}. ההמלצות מותאמות ל־${selected} ומציגות השפעה עד Q9.`
+      : `טרם אושר דוח רבעוני. העלו תוצאות כדי להפעיל המלצות ל־${selected} ותחזית עד Q9.`;
+  }
+
+  const onboarding = readiness?.onboarding || {};
+  const ready = Boolean(onboarding.ready ?? actual);
+  notice.classList.toggle("hidden", ready);
+  noticeText.textContent = actual
+    ? "השלימו את פרטי האסטרטגיה או הנתונים החסרים המסומנים כדי לאפשר אופטימיזציה מלאה."
+    : "העלו ואשרו דוח רבעוני אחד לפחות, ולאחר מכן אשרו את האסטרטגיה והיעדים.";
+
+  const empty = $("#executionBlueprintEmpty");
+  if (empty) {
+    empty.textContent = actual
+      ? `אין עדיין תכנית מספרית ל־${selected}. השלימו את הנתונים החסרים או אשרו את האסטרטגיה.`
+      : `אין עדיין תכנית מספרית ל־${selected}. אשרו דוח רבעוני ואסטרטגיה כדי לייצר אותה.`;
+  }
+}
+
 function renderQuarterPicker() {
   const select = $("#quarterSelect");
   if (!select || !state.meta) return;
@@ -109,6 +152,7 @@ function renderQuarterPicker() {
   ];
   select.innerHTML = options.join("");
   select.value = state.viewMode === "cumulative" ? "__all__" : state.quarter;
+  renderDynamicQuarterContext();
 }
 
 function selectedActionDefinition() {
@@ -248,7 +292,11 @@ function fieldRecommendation(input) {
     }
     if (name === "min_rd_sf") return result("110,000 SF", 110000, "40,000 SF ל־X ועוד 70,000 SF ל־Y כאשר מממנים את שני מסלולי המו״פ.", "Data Log — ספי השקעת מו״פ", "גבוהה");
     if (name === "company_name") return result("שם הקבוצה הרשמי", null, "השתמשו בשם אחד קבוע בכל הדוחות, הגיבויים והחלטות ההנהלה.", "הגדרת צוות", "גבוהה");
-    if (name === "startup_quarter") return result("Q4", "Q4", "Q1–Q3 הם בסיס הכיול; העבודה השוטפת מתחילה בהחלטות לקראת Q4.", "תהליך העבודה שאושר", "גבוהה");
+    if (name === "startup_quarter") {
+      const actual = actualDataQuarter();
+      const recommended = nextPlanningQuarter(actual);
+      return result(recommended, recommended, actual ? `זהו הרבעון הבא לאחר ה־Actual המאושר האחרון (${actual}).` : "בחרו את הרבעון הראשון שבו הצוות מתכנן החלטות.", actual ? "דוחות Actual מאושרים" : "הגדרת צוות", actual ? "גבוהה" : "בינונית");
+    }
   }
 
   if (formId === "actionForm") {
@@ -879,7 +927,7 @@ async function loadIntelligence() {
   renderFinancePage();
   refreshFieldAdvice();
   const readiness = await api(`/api/dashboard/${state.quarter}`);
-  $("#setupNotice").classList.toggle("hidden", readiness.onboarding?.ready);
+  renderDynamicQuarterContext(readiness);
 }
 
 function renderStrategyOptimization() {
@@ -1100,6 +1148,7 @@ async function loadUploads() {
       .map(row => String(row.quarter))
   )].sort((a, b) => quarterNumber(a) - quarterNumber(b));
   renderQuarterPicker();
+  renderDynamicQuarterContext();
   $("#uploadCount").textContent = `${uploads.length} קבצים`;
   $("#importCount").textContent = `${imports.length} תהליכים`;
   $("#uploadsList").innerHTML = uploads.length ? uploads.map(row => `<div class="file-row"><strong>${esc(row.original_name)}</strong><span>${esc(row.quarter)}</span><span>${esc(row.category)}</span><span>${fmt(row.size_bytes / 1024, 1)} KB</span><div class="file-actions"><a href="/api/uploads/${encodeURIComponent(row.id)}/download">הורדה</a><button class="delete" data-delete-upload="${esc(row.id)}" type="button">מחיקה</button></div></div>`).join("") : '<div class="empty-copy">טרם הועלו קבצים.</div>';
@@ -1250,10 +1299,15 @@ async function loadInsights() {
 
 async function loadResearch() {
   const domain = $("#researchDomainSelect").value || "";
-  const [data, intelligence] = await Promise.all([
+  const [researchResult, intelligenceResult] = await Promise.allSettled([
     api(`/api/research/relevant/${state.quarter}?domain=${encodeURIComponent(domain)}`),
     api(`/api/market-intelligence/${state.quarter}`),
   ]);
+  if (researchResult.status === "rejected") throw researchResult.reason;
+  const data = researchResult.value;
+  const intelligence = intelligenceResult.status === "fulfilled" ? intelligenceResult.value : {
+    recommended_research: [], calibration_signals: [], cannot_conclude: ["היסטוריית ניתוחי השוק אינה זמינה כרגע; תוצאות המחקר המאושרות עדיין מוצגות."], mapping_coverage: {},
+  };
   state.marketIntelligence = intelligence;
   $("#researchResults").innerHTML = data.results.length ? data.results.map(row => `<article class="research-card ${row.relevant ? "relevant" : ""}"><div class="research-meta"><span class="soft-pill">${esc(row.quarter)}</span><span class="soft-pill">ודאות ${esc(row.confidence)}</span>${row.area ? `<span class="soft-pill">${esc(row.area)}</span>` : ""}</div><h2>${esc(row.title)}</h2><p>${esc(row.key_result || "טרם הוזן סיכום מובנה למחקר.")}</p><button class="text-link rtl-next-link" type="button" data-ask-research="${esc(row.title)}">שאל את ה-Agent על המחקר</button></article>`).join("") : '<div class="empty-copy">לא נקלטו מחקרי שוק מאושרים.</div>';
   $("#researchCatalog").innerHTML = data.catalog.map(row => `<div class="compact-row"><div><strong>MR${esc(row.study_id)} · ${esc(row.name)}</strong><small>${esc(row.description)}</small></div><span class="soft-pill">${row.cost_k_sf == null ? "עלות לא ידועה" : `${fmt(row.cost_k_sf)}K SF`}</span></div>`).join("");
@@ -1287,10 +1341,13 @@ function renderDecisionLog(rows) {
 }
 
 async function loadDecisionLog() {
-  const [rows, sessions] = await Promise.all([
+  const [decisionsResult, sessionsResult] = await Promise.allSettled([
     api("/api/decisions"),
     api(`/api/governance/sessions?quarter=${encodeURIComponent(state.quarter)}`),
   ]);
+  if (decisionsResult.status === "rejected") throw decisionsResult.reason;
+  const rows = decisionsResult.value;
+  const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value : [];
   state.decisions = rows;
   state.governanceSessions = sessions;
   renderDecisionLog(rows);
