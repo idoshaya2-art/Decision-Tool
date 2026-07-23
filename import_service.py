@@ -274,6 +274,8 @@ def _intopia_finance(tables: dict[str, list[list[Any]]]) -> dict[str, Any]:
     balance_snapshot = {
         "inventory_value_sf": round(_number(_cell(balance, 13, 9)) or 0, 2),
         "current_assets_sf": round(_number(_cell(balance, 16, 9)) or 0, 2),
+        "accounts_payable_sf": round(_sum_cells(balance, (26, 27), (9,)), 2),
+        "supplier_credit_sf": round(_number(_cell(balance, 28, 9)) or 0, 2),
         "current_liabilities_sf": round(_number(_cell(balance, 30, 9)) or 0, 2),
         "total_assets_sf": round(_number(_cell(balance, 22, 9)) or 0, 2),
         "total_liabilities_sf": round(_number(_cell(balance, 36, 9)) or 0, 2),
@@ -288,7 +290,10 @@ def _intopia_finance(tables: dict[str, list[list[Any]]]) -> dict[str, Any]:
         # Debt is limited to bank loans and long-term bonds.
         "debt_sf": round(interest_bearing_debt, 2),
         "ar_sf": round(_sum_cells(balance, (7, 8), (9,)), 2),
-        "ap_sf": round(_number(_cell(balance, 30, 9)) or 0, 2),
+        # Accounts payable is the sum of the two A/P ageing rows. It must
+        # never be confused with total current liabilities, which also
+        # includes supplier credit and area bank loans.
+        "ap_sf": round(_sum_cells(balance, (26, 27), (9,)), 2),
         "research_budget_sf": round(_number(_cell(income, 45, 9)) or 0, 2),
         "rd_x_sf": round(_number(_cell(income, 46, 9)) or 0, 2),
         "rd_y_sf": round(_number(_cell(income, 47, 9)) or 0, 2),
@@ -344,14 +349,17 @@ def _intopia_area_finance(tables: dict[str, list[list[Any]]]) -> list[dict[str, 
                 "ending_cash_lc": round(_number(_cell(balance, 6, balance_column)) or 0, 2),
                 "debt_lc": round(debt_lc, 2),
                 "ar_lc": round(_sum_cells(balance, (7, 8), (balance_column,)), 2),
-                "ap_lc": round(_number(_cell(balance, 30, balance_column)) or 0, 2),
+                "ap_lc": round(_sum_cells(balance, (26, 27), (balance_column,)), 2),
                 "inventory_value_lc": round(_number(_cell(balance, 13, balance_column)) or 0, 2),
                 "current_assets_lc": round(_number(_cell(balance, 16, balance_column)) or 0, 2),
                 "current_liabilities_lc": round(_number(_cell(balance, 30, balance_column)) or 0, 2),
                 "equity_lc": round(_number(_cell(balance, 47, balance_column)) or 0, 2),
                 "total_investment_lc": round(_number(_cell(balance, 22, balance_column)) or 0, 2),
-                "operating_cash_flow_lc": 0,
-                "capex_commitments_lc": 0,
+                # These fields are not present in the official quarterly
+                # workbook. Preserve missingness instead of manufacturing a
+                # zero, so the UI and AI cannot interpret "unknown" as none.
+                "operating_cash_flow_lc": None,
+                "capex_commitments_lc": None,
                 "notes": "Actual מתוך Balance Sheet ו-Income Statement.",
             }
         )

@@ -113,6 +113,13 @@ function renderDynamicQuarterContext(readiness = null) {
 
   const actual = actualDataQuarter();
   const selected = state.quarter;
+  const dataStep = $("#flowDataStep");
+  if (dataStep) {
+    dataStep.classList.toggle("complete", Boolean(actual));
+    dataStep.title = actual
+      ? `Actuals מאושרים עד ${actual}. לחצו לצפייה במקורות ובבדיקות הקליטה.`
+      : "נדרש להעלות ולאשר לפחות דוח רבעוני אחד לפני קבלת המלצות.";
+  }
   if (state.viewMode === "cumulative") {
     eyebrow.textContent = actual ? `מצב מצטבר עד ${actual}` : "מצב מצטבר";
     context.textContent = actual

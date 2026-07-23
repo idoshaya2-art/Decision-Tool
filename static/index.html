@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <title>EMBA TAU Simulation</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/styles.css?v=1.6.0">
+  <link rel="stylesheet" href="/static/styles.css?v=2.1.0">
 </head>
 <body>
   <header class="topbar">
@@ -53,11 +53,12 @@
           <div><p id="dashboardQuarterEyebrow" class="eyebrow">חדר החלטות</p><h1>חדר החלטות</h1><p id="dashboardContextText">טוען את תמונת המצב המאושרת ואת ההשפעה עד Q9…</p></div>
           <button id="refreshButton" class="button secondary" type="button">רענון נתונים</button>
         </div>
-        <nav class="decision-flow" aria-label="תהליך קבלת החלטה">
-          <button class="flow-step active" type="button" data-scroll-target="decisionSnapshot"><b>1</b><span><strong>תמונת מצב</strong><small>מה קורה עכשיו?</small></span></button>
-          <button class="flow-step" type="button" data-scroll-target="decisionPriority"><b>2</b><span><strong>החלטות קריטיות</strong><small>מה חייבים להחליט?</small></span></button>
-          <button class="flow-step" type="button" data-scroll-target="decisionImpact"><b>3</b><span><strong>בדיקת השפעה</strong><small>מה יקרה אם נפעל?</small></span></button>
-          <button class="flow-step" type="button" data-scroll-target="decisionApproval"><b>4</b><span><strong>אישור ותיעוד</strong><small>מי אחראי ומה הוחלט?</small></span></button>
+        <nav class="decision-flow" aria-label="תהליך העבודה הרבעוני">
+          <button id="flowDataStep" class="flow-step" type="button" data-go="files"><b>1</b><span><strong>קליטה ואישור</strong><small>האם נתוני האמת מוכנים?</small></span></button>
+          <button class="flow-step active" type="button" data-scroll-target="decisionSnapshot"><b>2</b><span><strong>אבחון</strong><small>מה השתנה ומה חוסם?</small></span></button>
+          <button class="flow-step" type="button" data-scroll-target="decisionPriority"><b>3</b><span><strong>תעדוף החלטות</strong><small>מה חייבים להחליט עכשיו?</small></span></button>
+          <button class="flow-step" type="button" data-scroll-target="decisionImpact"><b>4</b><span><strong>סימולציה ובחירה</strong><small>איזו חלופה מנצחת?</small></span></button>
+          <button class="flow-step" type="button" data-scroll-target="decisionApproval"><b>5</b><span><strong>אישור ותיעוד</strong><small>מי אחראי ומה הוחלט?</small></span></button>
         </nav>
         <div id="setupNotice" class="notice hidden"><strong>כדי להפעיל המלצות:</strong> <span id="setupNoticeText">העלו ואשרו דוח רבעוני ואסטרטגיה.</span></div>
         <div id="decisionSnapshot" class="q9-strip focus-summary">
@@ -474,6 +475,6 @@
     </main>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js?v=2.0.0" defer></script>
+  <script src="/static/app.js?v=2.1.0" defer></script>
 </body>
 </html>

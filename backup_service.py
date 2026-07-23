@@ -13,7 +13,7 @@ import db
 
 BACKUP_FORMAT = "intopia-dss-cloud-backup"
 BACKUP_VERSION = 1
-APP_VERSION = "1.9.1-data-loading-hotfix"
+APP_VERSION = "2.1.0-truth-foundation"
 
 
 class BackupError(ValueError):

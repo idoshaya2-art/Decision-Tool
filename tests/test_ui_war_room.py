@@ -15,11 +15,16 @@ def test_war_room_uses_single_hamburger_navigation_and_progressive_disclosure():
     assert 'class="supporting-insights"' in INDEX
 
 
-def test_dashboard_has_a_clear_four_step_decision_flow():
+def test_dashboard_has_a_clear_five_step_operating_flow():
     assert 'class="decision-flow"' in INDEX
     for target in ("decisionSnapshot", "decisionPriority", "decisionImpact", "decisionApproval"):
         assert f'data-scroll-target="{target}"' in INDEX
         assert f'id="{target}"' in INDEX
+    assert 'id="flowDataStep"' in INDEX
+    assert 'data-go="files"' in INDEX
+    assert "קליטה ואישור" in INDEX
+    assert "סימולציה ובחירה" in INDEX
+    assert 'dataStep.classList.toggle("complete", Boolean(actual))' in APP
     assert '$$("[data-scroll-target]")' in APP
 
 
@@ -81,6 +86,6 @@ def test_optional_history_modules_do_not_hide_primary_data():
     assert "if (decisionsResult.status === \"rejected\") throw decisionsResult.reason" in APP
 
 
-def test_static_app_cache_key_is_advanced_for_controlled_loading_release():
-    assert '/static/app.js?v=2.0.0' in INDEX
-    assert '/static/styles.css?v=1.6.0' in INDEX
+def test_static_app_cache_key_is_advanced_for_truth_foundation_release():
+    assert '/static/app.js?v=2.1.0' in INDEX
+    assert '/static/styles.css?v=2.1.0' in INDEX

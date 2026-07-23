@@ -632,8 +632,13 @@ def build_scorecard(
     revenue_total = sum(num(row.get("revenue_sf")) for row in finance)
     profit_total = sum(num(row.get("net_profit_sf")) for row in finance)
     ros = _ratio(profit_total, revenue_total)
-    investment_sf = sum(num(row.get("total_investment_lc")) * num(row.get("fx_to_sf"), 1) for row in latest_area)
-    equity_sf = sum(num(row.get("equity_lc")) * num(row.get("fx_to_sf"), 1) for row in latest_area)
+    official_balance = _embedded_balance(latest_finance)
+    regional_investment_sf = sum(num(row.get("total_investment_lc")) * num(row.get("fx_to_sf"), 1) for row in latest_area)
+    regional_equity_sf = sum(num(row.get("equity_lc")) * num(row.get("fx_to_sf"), 1) for row in latest_area)
+    # Regional control accounts are not additive consolidated equity/assets.
+    # Prefer the official consolidated balance embedded by the exact parser.
+    investment_sf = num(official_balance.get("total_assets_sf")) or regional_investment_sf
+    equity_sf = num(official_balance.get("equity_sf")) or regional_equity_sf
     roi = _ratio(profit_total, investment_sf)
     roe = _ratio(num(latest_finance.get("net_profit_sf")), equity_sf)
     profit_values = [num(row.get("net_profit_sf")) for row in finance]

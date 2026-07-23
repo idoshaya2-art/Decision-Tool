@@ -3,6 +3,7 @@ pytest-cache-files-*/
 *.py[cod]
 .pytest_cache/
 .testdeps*/
+.qa-deps/
 .verifydeps/
 verifydeps/
 .runtimedeps/

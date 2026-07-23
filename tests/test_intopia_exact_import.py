@@ -24,6 +24,10 @@ def _quarter_workbook() -> bytes:
     balance["H34"] = 100_000
     balance["I33"] = 500_000
     balance["I34"] = 100_000
+    balance["I26"] = 240_000
+    balance["I27"] = 160_000
+    balance["I28"] = 300_000
+    balance["I30"] = 700_000
     balance["I36"] = 1_700_000
     balance["I49"] = 4_000_000
     income = workbook["Income Statement"]
@@ -76,8 +80,13 @@ def test_exact_intopia_parser_detects_quarter_and_paid_research():
     assert extracted["metadata"]["company_number"] == 8
     assert extracted["finance"]["revenue_sf"] == 600_000
     assert extracted["finance"]["debt_sf"] == 1_500_000
+    assert extracted["finance"]["ap_sf"] == 400_000
+    assert extracted["finance"]["ap_sf"] != 700_000
     assert '"total_assets_sf":4000000.0' in extracted["finance"]["notes"]
+    assert '"supplier_credit_sf":300000.0' in extracted["finance"]["notes"]
     assert len(extracted["finance_by_area"]) == 4
+    assert all(row["operating_cash_flow_lc"] is None for row in extracted["finance_by_area"])
+    assert all(row["capex_commitments_lc"] is None for row in extracted["finance_by_area"])
     debts = {row["area"]: row["debt_lc"] for row in extracted["finance_by_area"]}
     assert debts == {"USA": 200_000, "Europe": 300_000, "Brazil": 400_000, "Liechtenstein": 600_000}
     assert len(extracted["operations"]) == 12

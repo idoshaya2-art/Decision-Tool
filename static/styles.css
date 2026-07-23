@@ -751,7 +751,7 @@ main { padding-top: 28px; }
 .nav-more .secondary-nav { width: 100%; padding-inline-start: 24px; }
 .nav-settings { margin-top: 10px; border-top: 1px solid rgba(255,255,255,.08); border-radius: 0 0 9px 9px; }
 
-.decision-flow { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; margin-bottom: 18px; direction: rtl; }
+.decision-flow { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 8px; margin-bottom: 18px; direction: rtl; }
 .flow-step { position: relative; display: flex; align-items: center; gap: 10px; min-height: 66px; padding: 10px 12px; color: var(--muted); background: rgba(255,255,255,.82); border: 1px solid var(--line); border-radius: 12px; text-align: right; cursor: pointer; transition: .16s ease; }
 .flow-step:not(:last-child)::after { content: "←"; position: absolute; left: -11px; z-index: 2; color: #9aa7b6; font-weight: 800; }
 .flow-step > b { display: grid; flex: 0 0 28px; place-items: center; width: 28px; height: 28px; color: var(--navy-700); background: #edf1f5; border-radius: 50%; }
@@ -761,6 +761,9 @@ main { padding-top: 28px; }
 .flow-step:hover, .flow-step.active { border-color: #9ec7c2; background: #f0f8f7; }
 .flow-step.active { box-shadow: inset -3px 0 var(--teal); }
 .flow-step.active > b { color: white; background: var(--teal); }
+.flow-step.complete { border-color: #c9ddd9; background: #f7fbfa; }
+.flow-step.complete > b { color: white; background: #397e75; }
+.flow-step.complete strong::after { content: " ✓"; color: #397e75; }
 
 .focus-summary { grid-template-columns: 1.05fr 1.15fr 1fr 1fr; margin-bottom: 16px; background: #10243a; box-shadow: 0 12px 32px rgba(8,19,34,.11); scroll-margin-top: 96px; }
 .focus-summary > div { min-height: 112px; padding: 17px 19px; }
@@ -839,7 +842,7 @@ main { padding-top: 28px; }
   .decision-category:nth-child(2) { border-left: 0; }
   .decision-category:nth-child(n+3) { border-top: 1px solid var(--line); }
   .decision-flow { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .flow-step:nth-child(2)::after { display: none; }
+  .flow-step:nth-child(2)::after, .flow-step:nth-child(4)::after { display: none; }
   .focus-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .decision-workflow-grid { grid-template-columns: 1fr; }
 }

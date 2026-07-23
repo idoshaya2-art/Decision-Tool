@@ -309,6 +309,50 @@ def test_simulation_enforces_budget_and_returns_three_outcomes(client):
     assert result["recommended_sequence"]
 
 
+def test_ai_recommendation_and_scenario_lab_share_the_same_numeric_engine(client):
+    _seed_q1_to_q3(client)
+    intelligence = client.get("/api/intelligence/Q4")
+    assert intelligence.status_code == 200, intelligence.text
+    bundle = intelligence.json()
+    recommendation = next(
+        row for row in bundle["recommendations"]
+        if row.get("action_template")
+    )
+    action = {
+        **recommendation["action_template"],
+        "title": recommendation["title"],
+    }
+    baseline = bundle["financial"]["consolidated"]
+
+    simulated = client.post(
+        "/api/simulation/Q4",
+        json={
+            "name": f"Regression: {recommendation['title']}",
+            "budget_sf": baseline["available_budget_sf"],
+            "cash_buffer_sf": baseline["cash_buffer_sf"],
+            "actions": [action],
+        },
+    )
+    assert simulated.status_code == 200, simulated.text
+    result = simulated.json()
+    base_case = result["scenarios"]["base"]
+    impact = recommendation["economic_impact"]
+
+    assert impact["cost_sf"] == result["budget"]["planned_cost_sf"]
+    assert impact["budget_remaining_sf"] == result["budget"]["remaining_sf"]
+    assert impact["feasible"] == result["feasible"]
+    assert impact["profit_delta_sf"] == round(
+        float(base_case.get("net_profit_sf") or 0)
+        - float(baseline.get("net_profit_sf") or 0),
+        2,
+    )
+    assert impact["cash_delta_sf"] == round(
+        float(base_case.get("ending_cash_sf") or 0)
+        - float(baseline.get("ending_cash_sf") or 0),
+        2,
+    )
+
+
 def test_decisions_expose_dependencies_and_execution_order(client):
     _seed_q1_to_q3(client)
     intelligence = client.get("/api/intelligence/Q4")

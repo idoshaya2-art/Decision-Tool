@@ -1145,6 +1145,32 @@ def validate_report(extracted_data: dict[str, Any], expected_quarter: str = "") 
     checks: list[dict[str, Any]] = []
     metadata = extracted_data.get("metadata") or {}
     detected = str(metadata.get("detected_quarter") or "")
+    # The exact workbook parser performs structural reconciliations (for
+    # example Assets = Liabilities + Equity). Those checks are part of the
+    # approval contract, not merely preview messages.
+    for source_check in extracted_data.get("validation", []) or []:
+        if not isinstance(source_check, dict):
+            continue
+        source_status = str(source_check.get("status") or "").lower()
+        if source_status not in {"error", "warning"}:
+            continue
+        checks.append(
+            {
+                "rule_id": f"REPORT-{str(source_check.get('code') or 'STRUCTURE').upper()}",
+                "status": "fail" if source_status == "error" else "warning",
+                "blocking": source_status == "error",
+                "message": str(source_check.get("message") or "The quarterly report failed a structural check."),
+                "remediation": (
+                    "Do not approve the report. Verify the original workbook, quarter and consolidated totals."
+                    if source_status == "error"
+                    else "Review the source row before approving the report."
+                ),
+                "citation": {
+                    "source": "Official quarterly result workbook",
+                    "source_id": "quarterly_actuals",
+                },
+            }
+        )
     if expected_quarter.startswith("Q") and detected and detected != expected_quarter:
         checks.append(
             {
@@ -1204,6 +1230,29 @@ def validate_report(extracted_data: dict[str, Any], expected_quarter: str = "") 
                 }
             )
     finance = extracted_data.get("finance") or {}
+    if metadata.get("source_format") == "INTOPIA quarterly output":
+        if not finance:
+            checks.append(
+                {
+                    "rule_id": "REPORT-MISSING-FINANCE",
+                    "status": "fail",
+                    "blocking": True,
+                    "message": "The official quarterly workbook did not produce a consolidated financial statement.",
+                    "remediation": "Verify that Balance Sheet and Income Statement are present and use the supported template.",
+                    "citation": {"source": "Official quarterly result workbook", "source_id": "quarterly_actuals"},
+                }
+            )
+        if not operations:
+            checks.append(
+                {
+                    "rule_id": "REPORT-MISSING-OPERATIONS",
+                    "status": "fail",
+                    "blocking": True,
+                    "message": "The official quarterly workbook did not produce operating rows.",
+                    "remediation": "Verify that Management Info is present and uses the supported template.",
+                    "citation": {"source": "Official quarterly result workbook", "source_id": "quarterly_actuals"},
+                }
+            )
     if finance:
         for field in ("revenue_sf", "gross_profit_sf", "ending_cash_sf", "debt_sf", "ar_sf", "ap_sf"):
             value = finance.get(field)
